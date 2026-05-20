@@ -1,0 +1,32 @@
+{
+  "name": "forge",
+  "displayName": "Forge by ShipToday",
+  "version": "1.0.1",
+  "description": "Free, AI-powered product development lifecycle automation. Routes feature requests, bug reports, planning, reviews, and work-item follow-ups through structured ShipToday workflows backed by the hosted Forge MCP server.",
+  "author": {
+    "name": "ShipToday"
+  },
+  "homepage": "https://shiptoday.ai",
+  "repository": "https://github.com/ShipToday/forge-plugin-cursor",
+  "license": "MIT",
+  "keywords": [
+    "forge",
+    "shiptoday",
+    "pdlc",
+    "sdlc",
+    "workflow",
+    "planning",
+    "product-development",
+    "mcp"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "automation",
+    "workflow",
+    "planning",
+    "product-development"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./mcp.json"
+}
