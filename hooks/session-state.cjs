@@ -40,12 +40,19 @@ function workspaceRoot() {
   return process.env.CURSOR_PROJECT_DIR || process.cwd();
 }
 
-function hashCwd() {
-  return crypto.createHash('sha256').update(workspaceRoot()).digest('hex').slice(0, 16);
+/**
+ * Compute the state file key. Scoped to the session when a session id is
+ * available so concurrent sessions in the same workspace get independent
+ * state. Cursor hook events carry no session id, so the key falls back to
+ * hash(workspace) — preserving the single-slot-per-workspace behavior.
+ */
+function stateKey(sessionId) {
+  const material = sessionId ? `${workspaceRoot()}:${sessionId}` : workspaceRoot();
+  return crypto.createHash('sha256').update(material).digest('hex').slice(0, 16);
 }
 
-function statePath() {
-  return path.join(STATE_DIR, `${hashCwd()}.json`);
+function statePath(sessionId) {
+  return path.join(STATE_DIR, `${stateKey(sessionId)}.json`);
 }
 
 function ensureDir() {
@@ -54,9 +61,9 @@ function ensureDir() {
   }
 }
 
-function freshState() {
+function freshState(sessionId) {
   return {
-    session_id: crypto.randomUUID(),
+    session_id: sessionId || crypto.randomUUID(),
     session_start: new Date().toISOString(),
     turn_count: 0,
     nudge_shown: false,
@@ -98,74 +105,6 @@ function freshState() {
   };
 }
 
-// -- Public API --------------------------------------------------------------
-
-/**
- * Read the current session state.
- * Returns a fresh state if the file doesn't exist or is stale (> TTL_MS old).
- * Also triggers cleanup of stale files older than CLEANUP_AGE_MS.
- */
-function read() {
-  ensureDir();
-  cleanupStale();
-
-  const fp = statePath();
-  if (!fs.existsSync(fp)) {
-    const state = freshState();
-    writeRaw(state);
-    return state;
-  }
-
-  try {
-    const raw = fs.readFileSync(fp, 'utf8');
-    const state = JSON.parse(raw);
-
-    // Check staleness — if older than TTL, start a new session
-    const age = Date.now() - new Date(state.session_start).getTime();
-    if (age > TTL_MS) {
-      const fresh = freshState();
-      writeRaw(fresh);
-      return fresh;
-    }
-
-    return state;
-  } catch {
-    // Corrupted file — start fresh
-    const state = freshState();
-    writeRaw(state);
-    return state;
-  }
-}
-
-/**
- * Merge updates into the current session state and persist.
- * @param {Object} updates — fields to merge (shallow)
- */
-function write(updates) {
-  const state = read();
-  Object.assign(state, updates);
-  writeRaw(state);
-  return state;
-}
-
-/**
- * Increment a numeric field by 1 and persist.
- * @param {string} field — the field name to increment
- */
-function increment(field) {
-  const state = read();
-  state[field] = (state[field] || 0) + 1;
-  writeRaw(state);
-  return state;
-}
-
-// -- Internal ----------------------------------------------------------------
-
-function writeRaw(state) {
-  ensureDir();
-  fs.writeFileSync(statePath(), JSON.stringify(state, null, 2), 'utf8');
-}
-
 /**
  * Remove state files older than CLEANUP_AGE_MS.
  * Runs on every read() — cheap because the directory is small.
@@ -187,4 +126,83 @@ function cleanupStale() {
   }
 }
 
-module.exports = { read, write, increment, workspaceRoot };
+// -- Public API --------------------------------------------------------------
+
+/**
+ * Build a session-scoped state accessor. Pass the session id from the hook
+ * event; a falsy value yields the workspace-only fallback file. Cursor hook
+ * events carry no session id, so the workspace fallback is the norm.
+ *
+ * @param {string|undefined} sessionId — session id, if the host provides one
+ * @returns {{ read: Function, write: Function, increment: Function, stateFilePath: string }}
+ */
+function forSession(sessionId) {
+  const fp = statePath(sessionId);
+
+  function writeRaw(state) {
+    ensureDir();
+    fs.writeFileSync(fp, JSON.stringify(state, null, 2), 'utf8');
+  }
+
+  /**
+   * Read this session's state.
+   * Returns a fresh state if the file doesn't exist or is stale (> TTL_MS old).
+   * Also triggers cleanup of stale files older than CLEANUP_AGE_MS.
+   */
+  function read() {
+    ensureDir();
+    cleanupStale();
+
+    if (!fs.existsSync(fp)) {
+      const state = freshState(sessionId);
+      writeRaw(state);
+      return state;
+    }
+
+    try {
+      const raw = fs.readFileSync(fp, 'utf8');
+      const state = JSON.parse(raw);
+
+      // Check staleness — if older than TTL, start a new session
+      const age = Date.now() - new Date(state.session_start).getTime();
+      if (age > TTL_MS) {
+        const fresh = freshState(sessionId);
+        writeRaw(fresh);
+        return fresh;
+      }
+
+      return state;
+    } catch {
+      // Corrupted file — start fresh
+      const state = freshState(sessionId);
+      writeRaw(state);
+      return state;
+    }
+  }
+
+  /**
+   * Merge updates into this session's state and persist.
+   * @param {Object} updates — fields to merge (shallow)
+   */
+  function write(updates) {
+    const state = read();
+    Object.assign(state, updates);
+    writeRaw(state);
+    return state;
+  }
+
+  /**
+   * Increment a numeric field by 1 and persist.
+   * @param {string} field — the field name to increment
+   */
+  function increment(field) {
+    const state = read();
+    state[field] = (state[field] || 0) + 1;
+    writeRaw(state);
+    return state;
+  }
+
+  return { read, write, increment, stateFilePath: fp };
+}
+
+module.exports = { forSession };

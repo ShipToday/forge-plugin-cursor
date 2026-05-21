@@ -26,7 +26,7 @@
 
 'use strict';
 
-const sessionState = require('./session-state.cjs');
+const sessionStateModule = require('./session-state.cjs');
 
 // -- Forge tool detection -----------------------------------------------------
 // Separator-agnostic — Cursor names MCP tools `MCP:<tool>` and the joiner is
@@ -209,6 +209,9 @@ async function main() {
   } catch {
     return; // Malformed input — exit silently
   }
+
+  // Scope state to this session.
+  const sessionState = sessionStateModule.forSession(event.session_id);
 
   const toolName = event.tool_name || '';
   // Cursor delivers tool_output as a JSON-stringified result; parse it back

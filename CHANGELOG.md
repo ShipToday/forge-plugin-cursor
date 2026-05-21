@@ -4,6 +4,16 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-05-21
+
+Version alignment with the Forge 1.1.0 plugin release. No Cursor-facing
+functional changes.
+
+### Changed
+- Session-state hooks refactored onto the upstream `forSession()` accessor
+  (per-session workflow isolation). Cursor hook events carry no session id,
+  so workflow state stays scoped per workspace exactly as before.
+
 ## [1.0.1] - 2026-05-21
 
 Initial public release.
