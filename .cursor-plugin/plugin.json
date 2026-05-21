@@ -9,6 +9,7 @@
   "homepage": "https://shiptoday.ai",
   "repository": "https://github.com/ShipToday/forge-plugin-cursor",
   "license": "MIT",
+  "logo": "./assets/logo.png",
   "keywords": [
     "forge",
     "shiptoday",
