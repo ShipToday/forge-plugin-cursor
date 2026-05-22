@@ -37,7 +37,7 @@
 
 'use strict';
 
-const sessionState = require('./session-state.cjs');
+const sessionStateModule = require('./session-state.cjs');
 
 // -- Universal allowlist ----------------------------------------------------
 // Always-allowed tools regardless of active step. Forge orchestration,
@@ -234,8 +234,9 @@ async function main() {
   const toolName = event.tool_name || '';
   if (!toolName) return; // Nothing to gate
 
-  // Read session state, scoped to this Cursor conversation.
-  const state = sessionState.forSession(event.conversation_id).read();
+  // Scope state to this session.
+  const sessionState = sessionStateModule.forSession(event.session_id);
+  const state = sessionState.read();
   if (!state.active_workflow) return; // No workflow active — allow
 
   const bare = bareName(toolName);

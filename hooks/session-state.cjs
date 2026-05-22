@@ -3,28 +3,12 @@
 /**
  * session-state.cjs — Shared session state module for Forge plugin hooks.
  *
- * Manages a local JSON state file used by all four plugin hooks
- * (prompt-router, workflow-tracker, stop-observer, workflow-guard) to
- * coordinate active-workflow tracking and passive observation.
+ * Manages a local JSON state file per workspace, used by every Forge hook
+ * (prompt-router, stop-observer, workflow-guard, workflow-tracker) to
+ * coordinate and avoid conflicts.
  *
- * State is scoped per Cursor conversation. Every agent hook event carries a
- * `conversation_id` ("stable ID of the conversation across many turns"); the
- * state file is keyed by hash(workspaceRoot + ':' + conversation_id) so two
- * concurrent chats in the same workspace each get an independent slot. When
- * no conversation id is available (e.g. an app-lifecycle hook), the key
- * falls back to hash(workspaceRoot) — the original per-workspace behavior.
- *
- * Keying per workspace alone is a bug: a dismiss/snooze/link decision in one
- * chat would suppress passive observation for every other chat in the same
- * workspace until the 4h TTL reset. Per-conversation keying mirrors the
- * Claude Code build's `forSession(session_id)` scoping.
- *
- * Usage: `require('./session-state.cjs').forSession(event.conversation_id)`
- * returns a `{ read, write, increment, stateFilePath }` instance bound to
- * that conversation's file.
- *
- * State files live in {os.tmpdir()}/forge-observer/{key}.json and
- * auto-expire after 4 hours (matching Forge's server-side TTL).
+ * State files live in {os.tmpdir()}/forge-observer/{hash(workspace)}.json
+ * and auto-expire after 4 hours (matching Forge's server-side TTL).
  *
  * This module is deterministic — no AI, no network calls.
  */
@@ -45,31 +29,30 @@ const CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — auto-clean stale fil
 // -- Helpers -----------------------------------------------------------------
 
 /**
- * Resolve the active workspace path.
+ * Hash the active workspace path to a stable state-file key.
  *
  * Cursor sets `CURSOR_PROJECT_DIR` for every hook, but the process working
  * directory varies by hook source (project / user / enterprise configs run
  * from different roots). Preferring `CURSOR_PROJECT_DIR` keeps all four Forge
- * hooks pointed at the same workspace regardless of how they were launched.
+ * hooks pointed at the same state file regardless of how they were launched.
  */
 function workspaceRoot() {
   return process.env.CURSOR_PROJECT_DIR || process.cwd();
 }
 
 /**
- * Compute the state file key. Scoped to the Cursor conversation when a
- * conversation id is available so concurrent chats in the same workspace get
- * independent state. Falls back to a workspace-only key when no id is present.
+ * Compute the state file key. Scoped to the session when a session id is
+ * available so concurrent sessions in the same workspace get independent
+ * state. Cursor hook events carry no session id, so the key falls back to
+ * hash(workspace) — preserving the single-slot-per-workspace behavior.
  */
-function stateKey(conversationId) {
-  const material = conversationId
-    ? `${workspaceRoot()}:${conversationId}`
-    : workspaceRoot();
+function stateKey(sessionId) {
+  const material = sessionId ? `${workspaceRoot()}:${sessionId}` : workspaceRoot();
   return crypto.createHash('sha256').update(material).digest('hex').slice(0, 16);
 }
 
-function statePath(conversationId) {
-  return path.join(STATE_DIR, `${stateKey(conversationId)}.json`);
+function statePath(sessionId) {
+  return path.join(STATE_DIR, `${stateKey(sessionId)}.json`);
 }
 
 function ensureDir() {
@@ -78,9 +61,9 @@ function ensureDir() {
   }
 }
 
-function freshState(conversationId) {
+function freshState(sessionId) {
   return {
-    session_id: conversationId || crypto.randomUUID(),
+    session_id: sessionId || crypto.randomUUID(),
     session_start: new Date().toISOString(),
     turn_count: 0,
     nudge_shown: false,
@@ -146,14 +129,15 @@ function cleanupStale() {
 // -- Public API --------------------------------------------------------------
 
 /**
- * Build a conversation-scoped state accessor. Pass the `conversation_id`
- * from the hook event; a falsy value yields the workspace-only fallback file.
+ * Build a session-scoped state accessor. Pass the session id from the hook
+ * event; a falsy value yields the workspace-only fallback file. Cursor hook
+ * events carry no session id, so the workspace fallback is the norm.
  *
- * @param {string|undefined} conversationId — Cursor conversation id
+ * @param {string|undefined} sessionId — session id, if the host provides one
  * @returns {{ read: Function, write: Function, increment: Function, stateFilePath: string }}
  */
-function forSession(conversationId) {
-  const fp = statePath(conversationId);
+function forSession(sessionId) {
+  const fp = statePath(sessionId);
 
   function writeRaw(state) {
     ensureDir();
@@ -161,7 +145,7 @@ function forSession(conversationId) {
   }
 
   /**
-   * Read this conversation's state.
+   * Read this session's state.
    * Returns a fresh state if the file doesn't exist or is stale (> TTL_MS old).
    * Also triggers cleanup of stale files older than CLEANUP_AGE_MS.
    */
@@ -170,7 +154,7 @@ function forSession(conversationId) {
     cleanupStale();
 
     if (!fs.existsSync(fp)) {
-      const state = freshState(conversationId);
+      const state = freshState(sessionId);
       writeRaw(state);
       return state;
     }
@@ -182,7 +166,7 @@ function forSession(conversationId) {
       // Check staleness — if older than TTL, start a new session
       const age = Date.now() - new Date(state.session_start).getTime();
       if (age > TTL_MS) {
-        const fresh = freshState(conversationId);
+        const fresh = freshState(sessionId);
         writeRaw(fresh);
         return fresh;
       }
@@ -190,14 +174,14 @@ function forSession(conversationId) {
       return state;
     } catch {
       // Corrupted file — start fresh
-      const state = freshState(conversationId);
+      const state = freshState(sessionId);
       writeRaw(state);
       return state;
     }
   }
 
   /**
-   * Merge updates into this conversation's state and persist.
+   * Merge updates into this session's state and persist.
    * @param {Object} updates — fields to merge (shallow)
    */
   function write(updates) {

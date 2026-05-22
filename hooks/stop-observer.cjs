@@ -37,7 +37,7 @@
 
 'use strict';
 
-const sessionState = require('./session-state.cjs');
+const sessionStateModule = require('./session-state.cjs');
 
 // -- Constants ----------------------------------------------------------------
 
@@ -126,8 +126,7 @@ function emitFollowup(message) {
 // -- Main --------------------------------------------------------------------
 
 async function main() {
-  // Parse stop hook event from stdin. Cursor sends
-  // { status, loop_count, conversation_id, ...common }.
+  // Parse stop hook event from stdin. Cursor sends { status, loop_count }.
   let event = {};
   let input = '';
   for await (const chunk of process.stdin) {
@@ -139,13 +138,14 @@ async function main() {
     // Malformed input — exit silently
     return;
   }
-  // Read session state, scoped to this Cursor conversation. status /
-  // loop_count are unused — fire-once is driven by state flags.
-  const session = sessionState.forSession(event.conversation_id);
-  const state = session.read();
+  void event; // status / loop_count are unused — fire-once is driven by state flags
+
+  // Read session state, scoped to this session.
+  const sessionState = sessionStateModule.forSession(event.session_id);
+  const state = sessionState.read();
 
   // Step 1: Increment turn count
-  session.increment('turn_count');
+  sessionState.increment('turn_count');
   state.turn_count = (state.turn_count || 0) + 1; // keep local copy in sync
 
   // Step 2: Linked/logged sessions — silent checkpoint every CHECKPOINT_INTERVAL
@@ -168,9 +168,9 @@ async function main() {
     if (hasPendingSkills) {
       updates.skills_flushed_at_turn = (state.skill_invocations || []).length;
     }
-    session.write(updates);
+    sessionState.write(updates);
     // Auto-submit the silent checkpoint directive
-    emitFollowup(buildCheckpointDirective(elapsedMs, state, session.stateFilePath));
+    emitFollowup(buildCheckpointDirective(elapsedMs, state, sessionState.stateFilePath));
     return;
   }
 
@@ -181,13 +181,13 @@ async function main() {
     // Reset state so observer can re-prompt the user. Also reset
     // observer_fired so the per-session "fire once" counter restarts —
     // the user explicitly asked to be re-prompted by snoozing.
-    session.write({
+    sessionState.write({
       observer_blocked: false,
       observer_fired: false,
       status: null,
       last_observer_turn: state.turn_count,
     });
-    emitFollowup(buildObservationDirective(session.stateFilePath));
+    emitFollowup(buildObservationDirective(sessionState.stateFilePath));
     return;
   }
 
@@ -207,10 +207,10 @@ async function main() {
   // Step 7: Mark as blocked so we don't fire again on the same turn, AND
   // mark observer_fired so prompt-router.cjs preserves the "fire once" UX
   // on subsequent turns.
-  session.write({ observer_blocked: true, observer_fired: true });
+  sessionState.write({ observer_blocked: true, observer_fired: true });
 
   // Step 8: Auto-submit a turn directing the model to evaluate the session
-  emitFollowup(buildObservationDirective(session.stateFilePath));
+  emitFollowup(buildObservationDirective(sessionState.stateFilePath));
 }
 
 main().catch(() => {

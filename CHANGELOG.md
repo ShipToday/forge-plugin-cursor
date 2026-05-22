@@ -4,15 +4,15 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] - 2026-05-21
+## [1.1.0] - 2026-05-21
 
-### Fixed
-- **Per-conversation session-state scoping.** Hook session state was keyed per
-  workspace, so dismissing, snoozing, or linking passive observation in one
-  chat suppressed the `stop` hook's observation for every other chat in the
-  same workspace until the 4-hour TTL reset. State is now keyed per Cursor
-  conversation (`conversation_id`), matching the Claude Code build — a dismiss
-  in one chat no longer affects sibling chats.
+Version alignment with the Forge 1.1.0 plugin release. No Cursor-facing
+functional changes.
+
+### Changed
+- Session-state hooks refactored onto the upstream `forSession()` accessor
+  (per-session workflow isolation). Cursor hook events carry no session id,
+  so workflow state stays scoped per workspace exactly as before.
 
 ## [1.0.1] - 2026-05-21
 

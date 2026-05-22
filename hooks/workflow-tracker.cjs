@@ -26,7 +26,7 @@
 
 'use strict';
 
-const sessionState = require('./session-state.cjs');
+const sessionStateModule = require('./session-state.cjs');
 
 // -- Forge tool detection -----------------------------------------------------
 // Separator-agnostic — Cursor names MCP tools `MCP:<tool>` and the joiner is
@@ -210,8 +210,8 @@ async function main() {
     return; // Malformed input — exit silently
   }
 
-  // Scope all state access to this Cursor conversation.
-  const session = sessionState.forSession(event.conversation_id);
+  // Scope state to this session.
+  const sessionState = sessionStateModule.forSession(event.session_id);
 
   const toolName = event.tool_name || '';
   // Cursor delivers tool_output as a JSON-stringified result; parse it back
@@ -227,10 +227,10 @@ async function main() {
     const skillName = toolInput.skill || null;
     // Ignore forge-autopilot — that's our own routing skill, not a local skill
     if (skillName && skillName !== 'forge-autopilot') {
-      const state = session.read();
+      const state = sessionState.read();
       const invocations = state.skill_invocations || [];
       invocations.push({ name: skillName, at: new Date().toISOString() });
-      session.write({ skill_invocations: invocations });
+      sessionState.write({ skill_invocations: invocations });
     }
     return;
   }
@@ -244,7 +244,7 @@ async function main() {
 
   // Workflow abandoned: clear local session state immediately.
   if (isAbandon && isWorkflowAbandoned(toolResponse)) {
-    session.write({
+    sessionState.write({
       active_workflow: false,
       observer_blocked: true,
       conversation_id: null,
@@ -278,7 +278,7 @@ async function main() {
     if (currentSkill === 'observe_session') {
       updates.last_observer_conversation_id = conversationId;
     }
-    session.write(updates);
+    sessionState.write(updates);
     return;
   }
 
@@ -294,29 +294,29 @@ async function main() {
       if (observerStatus === 'dismissed') {
         statusUpdates.observer_blocked = true;
       }
-      session.write(statusUpdates);
+      sessionState.write(statusUpdates);
       // Don't return — still check for workflow completion below
     }
 
     // Relayed-question pending_checkpoint pin/clear.
     const pendingStep = extractPendingCheckpointStep(toolResponse);
     if (pendingStep) {
-      session.write({
+      sessionState.write({
         pending_checkpoint: true,
         pending_checkpoint_step: pendingStep,
         pending_checkpoint_at: new Date().toISOString(),
       });
     } else if (isRelayedQuestionReentry(toolResponse)) {
-      session.write({
+      sessionState.write({
         pending_checkpoint: false,
         pending_checkpoint_step: null,
         pending_checkpoint_at: null,
       });
     } else if (!isWorkflowComplete(toolResponse)) {
       // Normal step advance ("NEXT STEP") — clear any stale pin.
-      const state = session.read();
+      const state = sessionState.read();
       if (state.pending_checkpoint) {
-        session.write({
+        sessionState.write({
           pending_checkpoint: false,
           pending_checkpoint_step: null,
           pending_checkpoint_at: null,
@@ -330,7 +330,7 @@ async function main() {
       const toolPermissions = extractToolPermissions(toolResponse);
       const currentStepSkill = extractCurrentStepSkill(toolResponse);
       if (toolPermissions || currentStepSkill) {
-        session.write({
+        sessionState.write({
           current_step_tools: toolPermissions,
           current_step_skill: currentStepSkill,
         });
@@ -340,7 +340,7 @@ async function main() {
 
   // Workflow completion: deactivate workflow but keep observer blocked.
   if (isStateUpdate && isWorkflowComplete(toolResponse)) {
-    session.write({
+    sessionState.write({
       active_workflow: false,
       observer_blocked: true,
       conversation_id: null,

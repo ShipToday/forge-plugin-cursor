@@ -46,7 +46,7 @@
 
 'use strict';
 
-const sessionState = require('./session-state.cjs');
+const sessionStateModule = require('./session-state.cjs');
 
 // -- Detection patterns ------------------------------------------------------
 
@@ -119,24 +119,23 @@ function emitWorkflowContinuation(conversationId, currentSkill) {
 
 async function main() {
   // Parse prompt from stdin. Cursor's beforeSubmitPrompt sends
-  // { prompt, attachments, conversation_id, ...common }.
+  // { prompt, attachments, ...common }.
   let prompt = '';
-  let conversationId;
   let input = '';
   for await (const chunk of process.stdin) {
     input += chunk;
   }
+  let event = {};
   try {
-    const event = JSON.parse(input);
+    event = JSON.parse(input);
     prompt = event.prompt || event.message || event.content || '';
-    conversationId = event.conversation_id;
   } catch {
     prompt = input.trim();
   }
 
-  // Read session state, scoped to this Cursor conversation.
-  const session = sessionState.forSession(conversationId);
-  const state = session.read();
+  // Read session state, scoped to this session.
+  const sessionState = sessionStateModule.forSession(event.session_id);
+  const state = sessionState.read();
 
   // Re-arm the session observer on each new turn when it's safe to do so.
   //
@@ -160,7 +159,7 @@ async function main() {
     && state.observer_blocked
     && !state.observer_fired
   ) {
-    session.write({ observer_blocked: false });
+    sessionState.write({ observer_blocked: false });
     state.observer_blocked = false; // keep local copy in sync for downstream checks
   }
 
@@ -178,7 +177,7 @@ async function main() {
   if (prompt) {
     const keyMatch = prompt.match(EPIC_KEY_RE);
     if (keyMatch) {
-      session.write({ routing_emitted: true });
+      sessionState.write({ routing_emitted: true });
       emitEpicKeyRouting(keyMatch[0]);
       return;
     }
