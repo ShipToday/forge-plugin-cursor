@@ -1,9 +1,0 @@
-{
-  "name": "forge-plugin-cursor",
-  "version": "1.1.0",
-  "private": true,
-  "description": "ShipToday Forge plugin for Cursor",
-  "scripts": {
-    "test": "node --test"
-  }
-}
