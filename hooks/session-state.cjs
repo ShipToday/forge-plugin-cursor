@@ -3,11 +3,11 @@
 /**
  * session-state.cjs — Shared session state module for Forge plugin hooks.
  *
- * Manages a local JSON state file per workspace, used by every Forge hook
- * (prompt-router, stop-observer, workflow-guard, workflow-tracker) to
- * coordinate and avoid conflicts.
+ * Manages a local JSON state file per session/conversation, used by every
+ * Forge hook (prompt-router, stop-observer, workflow-guard, workflow-tracker)
+ * to coordinate and avoid conflicts.
  *
- * State files live in {os.tmpdir()}/forge-observer/{hash(workspace)}.json
+ * State files live in {os.tmpdir()}/forge-observer/{hash(workspace+id)}.json
  * and auto-expire after 4 hours (matching Forge's server-side TTL).
  *
  * This module is deterministic — no AI, no network calls.
@@ -41,10 +41,10 @@ function workspaceRoot() {
 }
 
 /**
- * Compute the state file key. Scoped to the session when a session id is
- * available so concurrent sessions in the same workspace get independent
- * state. Cursor hook events carry no session id, so the key falls back to
- * hash(workspace) — preserving the single-slot-per-workspace behavior.
+ * Compute the state file key. Scoped per session/conversation when the host
+ * provides an id — Claude Code and Codex send `session_id`, Cursor sends
+ * `conversation_id` — so concurrent chats in the same workspace get
+ * independent state. Falls back to a workspace-only key when no id is present.
  */
 function stateKey(sessionId) {
   const material = sessionId ? `${workspaceRoot()}:${sessionId}` : workspaceRoot();
@@ -129,11 +129,10 @@ function cleanupStale() {
 // -- Public API --------------------------------------------------------------
 
 /**
- * Build a session-scoped state accessor. Pass the session id from the hook
- * event; a falsy value yields the workspace-only fallback file. Cursor hook
- * events carry no session id, so the workspace fallback is the norm.
+ * Build a session-scoped state accessor. Pass the session/conversation id
+ * from the hook event; a falsy value yields the workspace-only fallback file.
  *
- * @param {string|undefined} sessionId — session id, if the host provides one
+ * @param {string|undefined} sessionId — session/conversation id, if the host provides one
  * @returns {{ read: Function, write: Function, increment: Function, stateFilePath: string }}
  */
 function forSession(sessionId) {

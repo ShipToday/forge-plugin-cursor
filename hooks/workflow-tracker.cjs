@@ -211,7 +211,7 @@ async function main() {
   }
 
   // Scope state to this session.
-  const sessionState = sessionStateModule.forSession(event.session_id);
+  const sessionState = sessionStateModule.forSession(event.session_id || event.conversation_id);
 
   const toolName = event.tool_name || '';
   // Cursor delivers tool_output as a JSON-stringified result; parse it back
