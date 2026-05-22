@@ -134,7 +134,7 @@ async function main() {
   }
 
   // Read session state, scoped to this session.
-  const sessionState = sessionStateModule.forSession(event.session_id);
+  const sessionState = sessionStateModule.forSession(event.session_id || event.conversation_id);
   const state = sessionState.read();
 
   // Re-arm the session observer on each new turn when it's safe to do so.

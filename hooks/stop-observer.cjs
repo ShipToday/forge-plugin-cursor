@@ -141,7 +141,7 @@ async function main() {
   void event; // status / loop_count are unused — fire-once is driven by state flags
 
   // Read session state, scoped to this session.
-  const sessionState = sessionStateModule.forSession(event.session_id);
+  const sessionState = sessionStateModule.forSession(event.session_id || event.conversation_id);
   const state = sessionState.read();
 
   // Step 1: Increment turn count

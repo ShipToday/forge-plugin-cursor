@@ -4,6 +4,16 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-05-21
+
+### Fixed
+- **Passive observation now scopes per conversation on Cursor.** The session
+  hooks keyed observer/workflow state by workspace alone, so dismissing,
+  snoozing, or linking observation in one chat suppressed the `stop` hook for
+  every other chat in the same workspace until the 4-hour TTL reset. The hooks
+  now derive the state key from `event.session_id || event.conversation_id`,
+  and Cursor supplies `conversation_id`, so each chat is tracked independently.
+
 ## [1.1.0] - 2026-05-21
 
 Version alignment with the Forge 1.1.0 plugin release. No Cursor-facing

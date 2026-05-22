@@ -235,7 +235,7 @@ async function main() {
   if (!toolName) return; // Nothing to gate
 
   // Scope state to this session.
-  const sessionState = sessionStateModule.forSession(event.session_id);
+  const sessionState = sessionStateModule.forSession(event.session_id || event.conversation_id);
   const state = sessionState.read();
   if (!state.active_workflow) return; // No workflow active — allow
 
