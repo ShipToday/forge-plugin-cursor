@@ -234,7 +234,8 @@ async function main() {
   const toolName = event.tool_name || '';
   if (!toolName) return; // Nothing to gate
 
-  const state = sessionState.read();
+  // Read session state, scoped to this Cursor conversation.
+  const state = sessionState.forSession(event.conversation_id).read();
   if (!state.active_workflow) return; // No workflow active — allow
 
   const bare = bareName(toolName);

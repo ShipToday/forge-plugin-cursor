@@ -3,12 +3,28 @@
 /**
  * session-state.cjs — Shared session state module for Forge plugin hooks.
  *
- * Manages a local JSON state file per workspace, used by every Forge hook
- * (prompt-router, stop-observer, workflow-guard, workflow-tracker) to
- * coordinate and avoid conflicts.
+ * Manages a local JSON state file used by all four plugin hooks
+ * (prompt-router, workflow-tracker, stop-observer, workflow-guard) to
+ * coordinate active-workflow tracking and passive observation.
  *
- * State files live in {os.tmpdir()}/forge-observer/{hash(workspace)}.json
- * and auto-expire after 4 hours (matching Forge's server-side TTL).
+ * State is scoped per Cursor conversation. Every agent hook event carries a
+ * `conversation_id` ("stable ID of the conversation across many turns"); the
+ * state file is keyed by hash(workspaceRoot + ':' + conversation_id) so two
+ * concurrent chats in the same workspace each get an independent slot. When
+ * no conversation id is available (e.g. an app-lifecycle hook), the key
+ * falls back to hash(workspaceRoot) — the original per-workspace behavior.
+ *
+ * Keying per workspace alone is a bug: a dismiss/snooze/link decision in one
+ * chat would suppress passive observation for every other chat in the same
+ * workspace until the 4h TTL reset. Per-conversation keying mirrors the
+ * Claude Code build's `forSession(session_id)` scoping.
+ *
+ * Usage: `require('./session-state.cjs').forSession(event.conversation_id)`
+ * returns a `{ read, write, increment, stateFilePath }` instance bound to
+ * that conversation's file.
+ *
+ * State files live in {os.tmpdir()}/forge-observer/{key}.json and
+ * auto-expire after 4 hours (matching Forge's server-side TTL).
  *
  * This module is deterministic — no AI, no network calls.
  */
@@ -29,23 +45,31 @@ const CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — auto-clean stale fil
 // -- Helpers -----------------------------------------------------------------
 
 /**
- * Hash the active workspace path to a stable state-file key.
+ * Resolve the active workspace path.
  *
  * Cursor sets `CURSOR_PROJECT_DIR` for every hook, but the process working
  * directory varies by hook source (project / user / enterprise configs run
  * from different roots). Preferring `CURSOR_PROJECT_DIR` keeps all four Forge
- * hooks pointed at the same state file regardless of how they were launched.
+ * hooks pointed at the same workspace regardless of how they were launched.
  */
 function workspaceRoot() {
   return process.env.CURSOR_PROJECT_DIR || process.cwd();
 }
 
-function hashCwd() {
-  return crypto.createHash('sha256').update(workspaceRoot()).digest('hex').slice(0, 16);
+/**
+ * Compute the state file key. Scoped to the Cursor conversation when a
+ * conversation id is available so concurrent chats in the same workspace get
+ * independent state. Falls back to a workspace-only key when no id is present.
+ */
+function stateKey(conversationId) {
+  const material = conversationId
+    ? `${workspaceRoot()}:${conversationId}`
+    : workspaceRoot();
+  return crypto.createHash('sha256').update(material).digest('hex').slice(0, 16);
 }
 
-function statePath() {
-  return path.join(STATE_DIR, `${hashCwd()}.json`);
+function statePath(conversationId) {
+  return path.join(STATE_DIR, `${stateKey(conversationId)}.json`);
 }
 
 function ensureDir() {
@@ -54,9 +78,9 @@ function ensureDir() {
   }
 }
 
-function freshState() {
+function freshState(conversationId) {
   return {
-    session_id: crypto.randomUUID(),
+    session_id: conversationId || crypto.randomUUID(),
     session_start: new Date().toISOString(),
     turn_count: 0,
     nudge_shown: false,
@@ -98,74 +122,6 @@ function freshState() {
   };
 }
 
-// -- Public API --------------------------------------------------------------
-
-/**
- * Read the current session state.
- * Returns a fresh state if the file doesn't exist or is stale (> TTL_MS old).
- * Also triggers cleanup of stale files older than CLEANUP_AGE_MS.
- */
-function read() {
-  ensureDir();
-  cleanupStale();
-
-  const fp = statePath();
-  if (!fs.existsSync(fp)) {
-    const state = freshState();
-    writeRaw(state);
-    return state;
-  }
-
-  try {
-    const raw = fs.readFileSync(fp, 'utf8');
-    const state = JSON.parse(raw);
-
-    // Check staleness — if older than TTL, start a new session
-    const age = Date.now() - new Date(state.session_start).getTime();
-    if (age > TTL_MS) {
-      const fresh = freshState();
-      writeRaw(fresh);
-      return fresh;
-    }
-
-    return state;
-  } catch {
-    // Corrupted file — start fresh
-    const state = freshState();
-    writeRaw(state);
-    return state;
-  }
-}
-
-/**
- * Merge updates into the current session state and persist.
- * @param {Object} updates — fields to merge (shallow)
- */
-function write(updates) {
-  const state = read();
-  Object.assign(state, updates);
-  writeRaw(state);
-  return state;
-}
-
-/**
- * Increment a numeric field by 1 and persist.
- * @param {string} field — the field name to increment
- */
-function increment(field) {
-  const state = read();
-  state[field] = (state[field] || 0) + 1;
-  writeRaw(state);
-  return state;
-}
-
-// -- Internal ----------------------------------------------------------------
-
-function writeRaw(state) {
-  ensureDir();
-  fs.writeFileSync(statePath(), JSON.stringify(state, null, 2), 'utf8');
-}
-
 /**
  * Remove state files older than CLEANUP_AGE_MS.
  * Runs on every read() — cheap because the directory is small.
@@ -187,4 +143,82 @@ function cleanupStale() {
   }
 }
 
-module.exports = { read, write, increment, workspaceRoot };
+// -- Public API --------------------------------------------------------------
+
+/**
+ * Build a conversation-scoped state accessor. Pass the `conversation_id`
+ * from the hook event; a falsy value yields the workspace-only fallback file.
+ *
+ * @param {string|undefined} conversationId — Cursor conversation id
+ * @returns {{ read: Function, write: Function, increment: Function, stateFilePath: string }}
+ */
+function forSession(conversationId) {
+  const fp = statePath(conversationId);
+
+  function writeRaw(state) {
+    ensureDir();
+    fs.writeFileSync(fp, JSON.stringify(state, null, 2), 'utf8');
+  }
+
+  /**
+   * Read this conversation's state.
+   * Returns a fresh state if the file doesn't exist or is stale (> TTL_MS old).
+   * Also triggers cleanup of stale files older than CLEANUP_AGE_MS.
+   */
+  function read() {
+    ensureDir();
+    cleanupStale();
+
+    if (!fs.existsSync(fp)) {
+      const state = freshState(conversationId);
+      writeRaw(state);
+      return state;
+    }
+
+    try {
+      const raw = fs.readFileSync(fp, 'utf8');
+      const state = JSON.parse(raw);
+
+      // Check staleness — if older than TTL, start a new session
+      const age = Date.now() - new Date(state.session_start).getTime();
+      if (age > TTL_MS) {
+        const fresh = freshState(conversationId);
+        writeRaw(fresh);
+        return fresh;
+      }
+
+      return state;
+    } catch {
+      // Corrupted file — start fresh
+      const state = freshState(conversationId);
+      writeRaw(state);
+      return state;
+    }
+  }
+
+  /**
+   * Merge updates into this conversation's state and persist.
+   * @param {Object} updates — fields to merge (shallow)
+   */
+  function write(updates) {
+    const state = read();
+    Object.assign(state, updates);
+    writeRaw(state);
+    return state;
+  }
+
+  /**
+   * Increment a numeric field by 1 and persist.
+   * @param {string} field — the field name to increment
+   */
+  function increment(field) {
+    const state = read();
+    state[field] = (state[field] || 0) + 1;
+    writeRaw(state);
+    return state;
+  }
+
+  return { read, write, increment, stateFilePath: fp };
+}
+
+module.exports = { forSession };
