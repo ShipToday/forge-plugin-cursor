@@ -4,6 +4,22 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-05-23
+
+### Changed
+- **`forge-autopilot` skill — local-skill detection broadened to a
+  relevance-based filter.** Clients now declare every locally available skill
+  that is relevant to product development or the SDLC (brainstorming,
+  planning, code review, debugging, etc.), not only project-specific ones. A
+  Forge workflow step that declares a general-purpose skill via
+  `required_local_skills` no longer comes back with
+  `required_local_skills_missing`.
+- **`forge-autopilot` skill — model routing guidance is now
+  environment-aware.** The model-routing section now reads the
+  `guidance=claude_code_model_map | codex_model_map | model_agnostic_tier`
+  signal from the orchestrator and picks the matching tool-available model
+  rather than hard-coding a specific model family.
+
 ## [1.1.1] - 2026-05-21
 
 ### Fixed
