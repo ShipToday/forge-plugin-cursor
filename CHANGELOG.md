@@ -4,6 +4,28 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-05-25
+
+### Changed
+- **`forge-autopilot` skill — sub-agent step-token relay now requires
+  verbatim response forwarding.** When a step is delegated to a sub-agent,
+  the orchestrator's `forge__update_state` response (carrying the new
+  `step_token` and the next step's instructions) is delivered to the
+  sub-agent, not the parent. The sub-agent MUST return that response
+  verbatim so the parent can extract the new token before its next
+  `forge__update_state` call — a summarized relay leaves the parent
+  with a stale token and the next call fails with a token-mismatch
+  error. The guidance applies to Cursor sub-agent delegation as well
+  as to Claude Code's Agent tool and Codex's `spawn_agent`.
+- **`forge-workflow` skill — team-scope error code renamed.** The
+  `team_membership_required` error code (caller not a member of the
+  target team) has been replaced with `team_not_in_org` (target team
+  belongs to a different organization). SHI-749 broadens admin
+  authority over team-scoped workflow overrides so org admins can
+  manage any team in their own org, regardless of personal team
+  membership. The error tables in both the Create path and Delete
+  path now reflect the new code.
+
 ## [1.1.2] - 2026-05-23
 
 ### Changed
