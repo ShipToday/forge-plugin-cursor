@@ -4,6 +4,37 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-05-26
+
+### Added
+- **`forge-autopilot` skill — envelope detection for sub-agent
+  returns.** The orchestrator now wraps next-step instructions in a
+  `<<<FORGE_NEXT_STEP token="…" bytes=N>>>` … `<<<END FORGE_NEXT_STEP>>>`
+  envelope. After every sub-agent return, the parent agent scans for
+  the envelope (presence + byte-length match) and falls through to
+  `forge__get_workflow_state(conversation_id)` if it's missing or
+  truncated. The state fetch is the designed recovery channel —
+  read-only, owner-checked, and idempotent — and preserves any
+  `display_text` the sub-agent populated as a `## Findings` block.
+- **`forge-workflow` skill — `display_text` findings preservation
+  guidance.** When drafting a custom skill's `instructions`, the skill
+  now teaches admins to populate `display_text` whenever the skill
+  produces analytical output before pausing (Pattern A: pre-gate
+  payload; Pattern B: `needs_input` payload). The orchestrator caps
+  `display_text` at 8 KB and surfaces it above the CHECKPOINT body so
+  findings survive the sub-agent boundary.
+- **`forge-workflow` skill — Step 9a soft warnings on save.** When
+  `forge__save_workflow` returns a `warnings: [...]` array, the skill
+  surfaces each entry inline with the success message. The first
+  warning code, `missing_display_text_guidance`, flags custom-skill
+  instructions that emit `needs_input` without mentioning
+  `display_text`.
+
+### Changed
+- **`workflow-guard.cjs` — `forge__get_workflow_state` added to the
+  universal allowlist.** The read-only recovery channel is safe to
+  call mid-CHECKPOINT, so the workflow guard no longer denies it.
+
 ## [1.1.3] - 2026-05-25
 
 ### Changed

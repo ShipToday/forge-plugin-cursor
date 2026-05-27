@@ -44,10 +44,11 @@ const sessionStateModule = require('./session-state.cjs');
 // read-only primitives, and the user-question relay path.
 
 const ALWAYS_ALLOWED_BARE_NAMES = new Set([
-  // Forge orchestration — model needs these to advance / exit
+  // Forge orchestration — model needs these to advance / exit / recover
   'forge__update_state',
   'forge__abandon_workflow',
   'forge__start_workflow',
+  'forge__get_workflow_state', // Read-only recovery channel; safe to call mid-CHECKPOINT
   // Question relay — the way for the model to talk to the user mid-step
   'AskUserQuestion',
   // Read-only or local-only primitives — cannot mutate external state
