@@ -4,6 +4,41 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2026-05-28
+
+### Added
+- **`session-state.cjs` — per-session observation gate cache (SHI-759).**
+  A new `forge_observation_enabled` field stores the org-admin's
+  observation toggle for the session. When `false`, `stop-observer.cjs`
+  short-circuits silently on subsequent Stops so the observer doesn't
+  re-invoke `session_observer` — zero MCP round-trips for the steady
+  state. Field name is shared verbatim with the Cursor stop-observer
+  for parity.
+- **`stop-observer.cjs` — Step 3b gate (SHI-759).** Reads the new
+  `forge_observation_enabled` cache flag before the snoozed-session
+  re-fire path. Exits silently when the admin has opted out of
+  observation for the org. Placed AFTER the linked/logged checkpoint
+  branch so engineering-time tracking on already-tracked sessions
+  continues independently of the observation toggle.
+- **`workflow-tracker.cjs` — `observation_disabled` outcome backstop.**
+  The `OUTCOME_TO_STATUS` map now recognises the
+  `observation_disabled` outcome (org-admin gate fired,
+  SHI-758/SHI-759), maps it to `logged`, and pins the per-session
+  `forge_observation_enabled: false` cache flag so the SHI-759
+  stop-observer Step 3b read can short-circuit subsequent Stops
+  without an MCP round-trip. Backstop for the documented
+  gated-payload state write — if the AI parent forgets, this hook
+  makes the steady-state still cheap.
+
+### Changed
+- **`forge-autopilot` skill — envelope detection accepts envelopes
+  without `bytes=N`.** The parser now accepts the envelope on
+  **sentinels + token** alone. When `bytes=N` is absent (a common
+  smaller-model paraphrase mode — the agent keeps the sentinel shape
+  but drops the byte count as "boring metadata"), trust the envelope
+  without a state fetch. The fetch fallback still fires on missing /
+  restructured sentinels or on a declared-bytes mismatch.
+
 ## [1.1.4] - 2026-05-26
 
 ### Added

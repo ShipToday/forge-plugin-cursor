@@ -1,14 +1,26 @@
 #!/usr/bin/env node
 
 /**
- * session-state.cjs — Shared session state module for Forge plugin hooks.
+ * session-state.js — Shared session state module for Forge plugin hooks.
  *
- * Manages a local JSON state file per session/conversation, used by every
- * Forge hook (prompt-router, stop-observer, workflow-guard, workflow-tracker)
- * to coordinate and avoid conflicts.
+ * Manages a local JSON state file used by all four plugin hooks
+ * (prompt-router, workflow-tracker, stop-observer, workflow-guard) to
+ * coordinate active-workflow tracking and passive observation.
  *
- * State files live in {os.tmpdir()}/forge-observer/{hash(workspace+id)}.json
- * and auto-expire after 4 hours (matching Forge's server-side TTL).
+ * State is scoped per Claude Code session. Each hook event carries a
+ * `session_id`; the state file is keyed by hash(cwd + session_id) so two
+ * concurrent Claude Code sessions in the same working directory each get
+ * an independent workflow slot. When no session id is available (older
+ * Claude Code, or the Codex/Cursor builds of this plugin), the key falls
+ * back to hash(cwd) — preserving the original single-workflow-per-
+ * directory behavior.
+ *
+ * Usage: `require('./session-state.cjs').forSession(event.session_id)`
+ * returns a `{ read, write, increment, stateFilePath }` instance bound to
+ * that session's file.
+ *
+ * State files live in {os.tmpdir()}/forge-observer/{key}.json and
+ * auto-expire after 4 hours (matching Forge's server-side TTL).
  *
  * This module is deterministic — no AI, no network calls.
  */
@@ -29,25 +41,13 @@ const CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — auto-clean stale fil
 // -- Helpers -----------------------------------------------------------------
 
 /**
- * Hash the active workspace path to a stable state-file key.
- *
- * Cursor sets `CURSOR_PROJECT_DIR` for every hook, but the process working
- * directory varies by hook source (project / user / enterprise configs run
- * from different roots). Preferring `CURSOR_PROJECT_DIR` keeps all four Forge
- * hooks pointed at the same state file regardless of how they were launched.
- */
-function workspaceRoot() {
-  return process.env.CURSOR_PROJECT_DIR || process.cwd();
-}
-
-/**
- * Compute the state file key. Scoped per session/conversation when the host
- * provides an id — Claude Code and Codex send `session_id`, Cursor sends
- * `conversation_id` — so concurrent chats in the same workspace get
- * independent state. Falls back to a workspace-only key when no id is present.
+ * Compute the state file key. Scoped to the Claude Code session when a
+ * session id is available so concurrent sessions in the same working
+ * directory get independent state. Falls back to a cwd-only key when no
+ * session id is present.
  */
 function stateKey(sessionId) {
-  const material = sessionId ? `${workspaceRoot()}:${sessionId}` : workspaceRoot();
+  const material = sessionId ? `${process.cwd()}:${sessionId}` : process.cwd();
   return crypto.createHash('sha256').update(material).digest('hex').slice(0, 16);
 }
 
@@ -85,11 +85,11 @@ function freshState(sessionId) {
     skill_invocations: [],   // Local skills invoked this session [{ name, at }]
     skills_flushed_at_turn: 0, // Turn count at last skill invocation flush
     // Relayed-question pin: set when forge__update_state returns a
-    // **CHECKPOINT** response (skill is awaiting user input via the
-    // user-question relay). Cleared on **RE-ENTRY** (answer flowed back),
+    // **CHECKPOINT** response (skill is awaiting user input via
+    // AskUserQuestion). Cleared on **RE-ENTRY** (answer flowed back),
     // normal step advance, workflow completion, or abandonment.
-    // The workflow-guard preToolUse hook reads this to deny tool calls
-    // other than the user-question relay / forge__update_state /
+    // The workflow-guard PreToolUse hook reads this to deny tool calls
+    // other than AskUserQuestion / forge__update_state /
     // forge__abandon_workflow until the user has answered.
     pending_checkpoint: false,
     pending_checkpoint_step: null,    // Skill id pinned for input
@@ -102,6 +102,29 @@ function freshState(sessionId) {
     //     deny messages so the model knows which step is gating.
     current_step_tools: null,
     current_step_skill: null,
+    // ── SHI-759 / SHI-758 contract: forge_observation_enabled ──────────
+    // Per-Claude-Code-session cache of the org-admin's observation
+    // toggle (Clerk publicMetadata.forgeObservationEnabled, surfaced
+    // on the MCP side as context.org_settings.forgeObservationEnabled).
+    // Three-valued semantics:
+    //   - `null` (default) — cache miss. The stop-observer hook
+    //     proceeds with the normal FORGE OBSERVATION directive; the
+    //     MCP-side session_observer skill will read Clerk on the
+    //     first Stop in this session and the gated path will write
+    //     `false` here if the admin has disabled observation.
+    //   - `false` — admin has disabled observation for this org.
+    //     stop-observer.cjs exits silently on subsequent Stops
+    //     without invoking session_observer again (zero MCP
+    //     round-trips for the steady state).
+    //   - `true` — admin has explicitly enabled (also the implicit
+    //     default when no toggle is set). Same behavior as `null`
+    //     for the hook: normal directive on every Stop.
+    // Cache TTL is the session lifetime — no timestamp / invalidation
+    // logic on either side. Admin toggles take effect at the next
+    // Claude Code session start (which begins with a fresh state file).
+    // Field name SHARED VERBATIM with SHI-741 (Cursor stop-observer.cjs
+    // parity) — do NOT rename without coordinating both halves.
+    forge_observation_enabled: null,
   };
 }
 
@@ -129,10 +152,10 @@ function cleanupStale() {
 // -- Public API --------------------------------------------------------------
 
 /**
- * Build a session-scoped state accessor. Pass the session/conversation id
- * from the hook event; a falsy value yields the workspace-only fallback file.
+ * Build a session-scoped state accessor. Pass the `session_id` from the
+ * hook event; a falsy value yields the cwd-only fallback file.
  *
- * @param {string|undefined} sessionId — session/conversation id, if the host provides one
+ * @param {string|undefined} sessionId — Claude Code session id
  * @returns {{ read: Function, write: Function, increment: Function, stateFilePath: string }}
  */
 function forSession(sessionId) {

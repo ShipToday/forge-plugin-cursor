@@ -1,38 +1,40 @@
 #!/usr/bin/env node
 
 /**
- * workflow-guard.cjs — preToolUse hook for Forge workflow enforcement.
+ * workflow-guard.cjs — PreToolUse hook for Forge workflow enforcement.
  *
  * Fires before every tool call. Reads session state and decides whether the
  * tool may proceed. Two layers of enforcement:
  *
- *   1. CHECKPOINT enforcement: when the orchestrator has emitted a
- *      relayed-question CHECKPOINT and the workflow-tracker hook has set
- *      `pending_checkpoint: true`, only the user-question relay /
- *      forge__update_state / forge__abandon_workflow / read-only inspection
- *      may proceed.
+ *   1. CHECKPOINT enforcement (V1, #518): when the orchestrator has emitted
+ *      a relayed-question CHECKPOINT and the workflow-tracker hook has set
+ *      `pending_checkpoint: true`, only AskUserQuestion / forge__update_state
+ *      / forge__abandon_workflow / read-only inspection may proceed.
  *
- *   2. Per-step tool_permissions enforcement: when a workflow is active but
- *      no checkpoint is pending, the orchestrator publishes a
+ *   2. Per-step tool_permissions enforcement (V2, this PR): when a workflow
+ *      is active but no checkpoint is pending, the orchestrator publishes a
  *      `**Tool Permissions**: cat1, cat2, …` line on every step transition.
  *      The workflow-tracker hook mirrors that into `current_step_tools`.
  *      We deny tools whose category is not in the allowlist for the active
- *      step. Universal tools (Forge orchestration, read-only inspection,
- *      the user-question relay) are always allowed regardless of step.
+ *      step. Universal tools (Forge orchestration, Read/Grep/Glob,
+ *      AskUserQuestion, TodoWrite, web inspection) are always allowed
+ *      regardless of step.
  *
  * Defensive defaults:
  *   - If no workflow is active, allow.
- *   - If `current_step_tools` is null, fail open — only CHECKPOINT runs.
+ *   - If `current_step_tools` is null (e.g., older orchestrator that does
+ *     not publish the line), fail open — only CHECKPOINT enforcement runs.
  *   - If the tool name does not map to any known category, allow. Unknown
  *     tools (custom MCP connectors, future built-ins) should not be blocked
  *     by a closed-world allowlist.
  *
- * Cursor hook contract: preToolUse hooks emit `{ "permission": "deny",
- * "agent_message": "...", "user_message": "..." }` on stdout to refuse a
- * tool. `{ "permission": "allow" }` or no output lets the call proceed.
+ * Hook contract: PreToolUse hooks may emit a JSON payload on stdout with
+ * `{decision: "deny", reason: "..."}` to refuse the tool. Anything else
+ * (silence, exit code 0) allows the call to proceed.
  *
- * @see hooks/workflow-tracker.cjs for the state writes this hook reads
- * @see hooks/session-state.cjs for state management
+ * @see plugin/hooks/workflow-tracker.cjs for the state writes this hook reads
+ * @see plugin/hooks/session-state.cjs for state management
+ * @see src/skills/permissions.js for the server-side category source of truth
  */
 
 'use strict';
@@ -41,7 +43,8 @@ const sessionStateModule = require('./session-state.cjs');
 
 // -- Universal allowlist ----------------------------------------------------
 // Always-allowed tools regardless of active step. Forge orchestration,
-// read-only primitives, and the user-question relay path.
+// Claude Code primitives that cannot mutate state, and the user-question
+// relay path.
 
 const ALWAYS_ALLOWED_BARE_NAMES = new Set([
   // Forge orchestration — model needs these to advance / exit / recover
@@ -49,21 +52,17 @@ const ALWAYS_ALLOWED_BARE_NAMES = new Set([
   'forge__abandon_workflow',
   'forge__start_workflow',
   'forge__get_workflow_state', // Read-only recovery channel; safe to call mid-CHECKPOINT
-  // Question relay — the way for the model to talk to the user mid-step
+  // Question relay — the only way for the model to talk to the user mid-step
   'AskUserQuestion',
-  // Read-only or local-only primitives — cannot mutate external state
+  // Claude Code primitives — read-only or local-only, cannot mutate external state
   'Read',
   'Grep',
   'Glob',
   'TodoWrite',
+  'mark_chapter',
+  // Internal session tooling
+  'spawn_task',
 ]);
-
-// Separator-agnostic match for Forge orchestration tools. Cursor names MCP
-// tools `MCP:<tool>` and the exact server/tool joiner is not guaranteed, so
-// this catches `forge__update_state`, `forge.update_state`, `forge_update_state`,
-// etc. — the Forge orchestration tools must never be denied.
-const FORGE_ORCHESTRATION_RE =
-  /forge[._]*(start_workflow|update_state|abandon_workflow|get_workflow|save_workflow|delete_workflow|list_skills_catalog)/i;
 
 // Read-only MCP tool name prefixes (always-allowed during workflow time).
 const READONLY_PREFIXES = ['list_', 'get_', 'search_', 'query_', 'fetch_', 'read_', 'notion-search', 'notion-fetch', 'notion-get-'];
@@ -71,11 +70,13 @@ const READONLY_PREFIXES = ['list_', 'get_', 'search_', 'query_', 'fetch_', 'read
 // -- Category → tool patterns ----------------------------------------------
 // Maps the abstract categories the orchestrator publishes into concrete
 // tool name regexes. Each entry is checked against the bare tool name
-// (after stripping the `MCP:` / `mcp__<uuid>__` prefix).
+// (after stripping `mcp__<uuid>__`).
 //
 // The categories are deliberately coarse — the goal is to catch silent
-// bypass (e.g., Write during readiness_check), not to micromanage every
-// connector.
+// bypass (e.g., Edit during readiness_check), not to micromanage every
+// connector. A skill that declares `tracker_write` gets every common
+// tracker-write tool; if a connector ships a new write verb, it slots in
+// without a registry update.
 
 const CATEGORY_PATTERNS = {
   read_code:    [/^Read$/, /^Grep$/, /^Glob$/],
@@ -130,32 +131,24 @@ const CATEGORY_PATTERNS = {
     /^get_account_info$/,
   ],
 
-  // Cursor's shell tool is `Shell`; Bash/PowerShell kept for cross-tool parity.
-  code_edit:    [/^Edit$/, /^Write$/, /^NotebookEdit$/, /^apply_patch$/],
-  shell:        [/^Shell$/, /^Bash$/, /^PowerShell$/],
+  code_edit:    [/^Edit$/, /^Write$/, /^NotebookEdit$/],
+  shell:        [/^Bash$/, /^PowerShell$/],
 };
 
 // -- Helpers ----------------------------------------------------------------
 
 /**
- * Strip an MCP prefix from a tool name, returning the bare tool name.
- * Handles Cursor's `MCP:<tool>` form and the Claude Code / Codex
- * `mcp__<server>__<tool>` form. Non-MCP tool names are returned as-is.
+ * Strip the `mcp__<uuid>__` prefix from an MCP tool name, returning the
+ * bare tool name. Non-MCP tool names are returned as-is.
  */
 function bareName(toolName) {
   if (!toolName) return '';
-  let name = String(toolName);
-  // Cursor: MCP tool calls arrive as "MCP:<tool_name>".
-  if (name.startsWith('MCP:')) name = name.slice(4);
-  // Claude Code / Codex: "mcp__<server-uuid>__<tool>".
-  const m = name.match(/^mcp__[^_]+(?:-[^_]+)*__(.+)$/);
-  if (m) name = m[1];
-  return name;
+  const m = toolName.match(/^mcp__[^_]+(?:-[^_]+)*__(.+)$/);
+  return m ? m[1] : toolName;
 }
 
 function isUniversallyAllowed(bare) {
   if (ALWAYS_ALLOWED_BARE_NAMES.has(bare)) return true;
-  if (FORGE_ORCHESTRATION_RE.test(bare)) return true;
   for (const prefix of READONLY_PREFIXES) {
     if (bare.startsWith(prefix)) return true;
   }
@@ -177,13 +170,19 @@ function categoryFor(bare) {
   return null;
 }
 
+function isAllowedByStepPermissions(bare, allowedCategories) {
+  const category = categoryFor(bare);
+  if (!category) return true; // Unknown tool — fail open
+  return allowedCategories.includes(category);
+}
+
 function buildCheckpointDenyReason(state, toolName) {
   const lines = [
     `Forge workflow is at a CHECKPOINT awaiting user input (skill="${state.pending_checkpoint_step || 'unknown'}").`,
     `Tool "${toolName}" cannot proceed until the user has answered.`,
     ``,
     'You have three options:',
-    '  1. Ask the user the pending question and wait for their answer.',
+    '  1. Call AskUserQuestion to relay the pending question to the user.',
     '  2. Call forge__update_state with the user\'s answer (set state_updates.user_answer).',
     '  3. Call forge__abandon_workflow with a meaningful reason if the workflow no longer applies.',
     ``,
@@ -201,21 +200,12 @@ function buildStepPermissionDenyReason(state, toolName, category) {
     ``,
     'Likely you are trying to do work that belongs to a later step. Options:',
     '  1. Continue the current step and call forge__update_state to advance — the next step may allow this tool.',
-    '  2. Ask the user if they need to make a decision before this step can complete.',
+    '  2. Call AskUserQuestion if the user needs to make a decision before this step can complete.',
     '  3. Call forge__abandon_workflow with a meaningful reason if the workflow no longer applies.',
     ``,
     'Do NOT silently bypass the workflow. The audit trail is how the team learns when workflows misroute.',
   ];
   return lines.join('\n');
-}
-
-/** Emit a Cursor preToolUse deny decision. */
-function deny(agentMessage, userMessage) {
-  process.stdout.write(JSON.stringify({
-    permission: 'deny',
-    agent_message: agentMessage,
-    user_message: userMessage,
-  }));
 }
 
 // -- Main -------------------------------------------------------------------
@@ -235,22 +225,22 @@ async function main() {
   const toolName = event.tool_name || '';
   if (!toolName) return; // Nothing to gate
 
-  // Scope state to this session.
-  const sessionState = sessionStateModule.forSession(event.session_id || event.conversation_id);
+  // Scope state to this Claude Code session.
+  const sessionState = sessionStateModule.forSession(event.session_id);
   const state = sessionState.read();
   if (!state.active_workflow) return; // No workflow active — allow
 
   const bare = bareName(toolName);
 
-  // Universals always pass — Forge orchestration, user-question relay, read-only.
+  // Universals always pass — Forge orchestration, AskUserQuestion, read-only.
   if (isUniversallyAllowed(bare)) return;
 
   // Layer 1: CHECKPOINT enforcement.
   if (state.pending_checkpoint) {
-    deny(
-      buildCheckpointDenyReason(state, bare),
-      'Forge workflow is at a checkpoint — answer the pending question before continuing.',
-    );
+    process.stdout.write(JSON.stringify({
+      decision: 'deny',
+      reason: buildCheckpointDenyReason(state, bare),
+    }));
     return;
   }
 
@@ -258,10 +248,10 @@ async function main() {
   if (Array.isArray(state.current_step_tools) && state.current_step_tools.length > 0) {
     const category = categoryFor(bare);
     if (category && !state.current_step_tools.includes(category)) {
-      deny(
-        buildStepPermissionDenyReason(state, bare, category),
-        `Forge workflow step does not allow "${category}" tools — advance the workflow first.`,
-      );
+      process.stdout.write(JSON.stringify({
+        decision: 'deny',
+        reason: buildStepPermissionDenyReason(state, bare, category),
+      }));
       return;
     }
   }
@@ -272,4 +262,6 @@ async function main() {
 
 main().catch(() => {
   // Fail open — never block the user's tool call due to a hook error.
+  // The rest of the enforcement (workflow-tracker logging, audit trail)
+  // continues to operate even if this hook is partially broken.
 });
