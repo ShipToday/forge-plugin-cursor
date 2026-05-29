@@ -4,6 +4,31 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-05-28
+
+### Changed
+- **`stop-observer.cjs` — `FORGE OBSERVATION` directive trimmed to a
+  concise form (SHI-760).** The `stop` hook previously emitted a
+  ~30-line block enumerating the full SDLC activity taxonomy and a
+  false-negative checklist. That taxonomy now lives server-side in the
+  `session_observer` skill, so the hook carries only the short
+  invoke/skip decision. This matters on Cursor in particular: Cursor
+  surfaces the `stop` hook's block reason to the user verbatim, where
+  the long block read as noise.
+
+### Fixed
+- **`workflow-tracker.cjs` — `observation_disabled` gate no longer maps
+  to `logged`.** The 1.1.5 backstop routed the `observation_disabled`
+  outcome (org-admin opted out of observation, SHI-758/SHI-759) through
+  `OUTCOME_TO_STATUS` to `logged`. Marking a disabled org as `logged`
+  made `stop-observer.cjs` treat the session as tracked and fire
+  periodic engineering-time checkpoints for it. The gate is now
+  detected separately — keyed off the `observation_disabled` outcome
+  rather than its event type — and maps to no tracking status. Its only
+  effect is pinning the per-session `forge_observation_enabled: false`
+  cache flag so subsequent Stops short-circuit without an MCP
+  round-trip.
+
 ## [1.1.5] - 2026-05-28
 
 ### Added
