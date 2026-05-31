@@ -4,6 +4,24 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2026-05-30
+
+### Fixed
+- **`stop-observer.cjs` — engineering-time checkpoints now fire on a
+  wall-clock time floor, not turn count alone.** The `stop` hook
+  previously banked elapsed engineering time only every
+  `CHECKPOINT_INTERVAL` turns. Turns are a poor proxy for elapsed
+  time: a handful of long research/implementation turns could leave a
+  large un-banked gap (an unbroken 92.8-minute delta was observed in
+  the wild). A checkpoint now fires when EITHER the turn interval OR a
+  10-minute wall-clock floor (`TIME_FLOOR_MS`) is reached — whichever
+  comes first. The checkpoint baseline advances at directive-emit time
+  (not on the confirmed `forge__update_state` write), so consecutive
+  deltas never overlap or double-count engineering time. Because Cursor
+  exposes no model-driving session-end event, no final flush can be
+  forced at exit; the residual un-banked tail on a clean exit is now
+  bounded by the time floor rather than being effectively unbounded.
+
 ## [1.1.6] - 2026-05-28
 
 ### Changed
