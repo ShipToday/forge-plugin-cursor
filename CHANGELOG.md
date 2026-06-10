@@ -4,6 +4,52 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-10
+
+### Added
+- **`token-usage.cjs` (new) — per-session token-capture adapters
+  (SHI-378 / SHI-724).** Shared library deriving a cumulative raw-component
+  token snapshot (input / cache reads / cache creation / output, attributed
+  per model) from a local AI-client session log. **On Cursor this always
+  resolves to `null` by design:** Cursor exposes no per-session model token
+  usage to plugin hooks (the only token-bearing payload, `preCompact`'s
+  `context_tokens`, is context-window occupancy rather than billing usage,
+  and Cursor staff describe the local `state.vscdb` `tokenCount` as
+  best-effort and unreliable). Forge records no token rows for Cursor
+  sessions rather than fabricating numbers — the ShipToday dashboard
+  reports Cursor as not measured. The library ships so the other hooks stay
+  source-identical and capture lights up automatically if a future Cursor
+  release exposes usage.
+- **`active-time.cjs` (new) — idle-excluded engineering time (R1).** Sums
+  gaps between session-log records, capping idle gaps at 5 minutes, so a
+  long pause is not banked as engineering time. With no readable session
+  log on Cursor it returns `null` and checkpoints keep the wall-clock
+  delta — same behavior as before, now an explicit documented fallback.
+
+### Changed
+- **`stop-observer.cjs` — checkpoint directives now carry `token_usage`
+  (when capturable — never on Cursor, see above) and `client_session_id`
+  (when the `stop` event carries a session id), and bank idle-excluded
+  active time where a session log exists.** On Cursor the engineering-time
+  delta remains wall-clock.
+- **`workflow-guard.cjs` — Cursor build never emits `preToolUse` input
+  rewrites.** The Claude Code and Codex builds stamp token usage,
+  `client_session_id`, and active `duration_ms` onto `forge__update_state`
+  by rewriting the tool input (`hookSpecificOutput.updatedInput`). On
+  Cursor there is nothing to stamp and `updatedInput` support in Cursor's
+  hook protocol is unverified, so this build keeps the checkpoint and
+  per-step permission enforcement and skips the rewrite path entirely
+  (`SUPPORTS_UPDATED_INPUT = false`).
+- **`workflow-guard.cjs` — MCP server-name prefix stripping now handles
+  underscore-named servers** (e.g.
+  `mcp__plugin_forge_forge__forge__update_state`), so Forge's own tools are
+  always recognized as universally allowed instead of being denied
+  mid-CHECKPOINT.
+- **`workflow-tracker.cjs` / `session-state.cjs` — per-step activity
+  boundary (`step_active_since`) and checkpoint-baseline advances on
+  workflow completion/abandon**, preventing a tracked session's next
+  checkpoint from re-banking the workflow's own span (anti-double-count).
+
 ## [1.1.7] - 2026-05-30
 
 ### Fixed
