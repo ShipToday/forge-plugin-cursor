@@ -28,10 +28,36 @@
  *     tools (custom MCP connectors, future built-ins) should not be blocked
  *     by a closed-world allowlist.
  *
- * Hook contract: PreToolUse hooks may emit a JSON payload on stdout with
- * `{decision: "deny", reason: "..."}` to refuse the tool. Anything else
- * (silence, exit code 0) allows the call to proceed.
+ * Token stamping (SHI-724): for forge__update_state in any TRACKED session
+ * (an active workflow, or a logged/linked observer session) this hook ALSO
+ * rewrites the tool input via `updatedInput`, stamping a cumulative token
+ * snapshot onto state_updates.token_usage. This is the client-side analog of
+ * the server-side duration_ms stamp — the Forge server makes no Anthropic
+ * calls so it cannot measure token usage, and a PreToolUse rewrite lands the
+ * tokens on the SAME call that already records duration. The orchestrator
+ * persists them as a separate token_usage row (src/orchestrator.js). It
+ * replaces the fragile legacy path where the model had to RELAY the Stop-hook
+ * directive's token_usage by hand (which it silently dropped — leaving null
+ * token columns on ad_hoc/checkpoint rows).
  *
+ * Hook contract: PreToolUse hooks may emit a JSON payload on stdout —
+ * `{decision: "deny", reason: "..."}` to refuse the tool, or
+ * `{hookSpecificOutput: {permissionDecision: "allow", updatedInput: {…}}}`
+ * to rewrite the tool input (Claude Code >= 2.0.10). Anything else (silence,
+ * exit code 0) allows the call to proceed unchanged.
+ *
+ * ── Cursor build localization ──
+ * Cursor exposes no per-session model token usage to plugin hooks (the
+ * upstream feature request is open with no ship date), so the token stamp
+ * would never have anything to deliver — and `updatedInput`-style input
+ * rewrites have no verified support in Cursor's hook protocol. This build
+ * therefore never emits input rewrites (SUPPORTS_UPDATED_INPUT below):
+ * token capture stays honest-null, `duration_ms` keeps the server's
+ * wall-clock fallback, and the checkpoint / per-step permission enforcement
+ * below is identical to the Claude Code source — keep it that way on every
+ * plugin sync (/shiptoday-plugin).
+ *
+ * @see plugin/hooks/token-usage.cjs for the transcript-parsing capture adapters
  * @see plugin/hooks/workflow-tracker.cjs for the state writes this hook reads
  * @see plugin/hooks/session-state.cjs for state management
  * @see src/skills/permissions.js for the server-side category source of truth
@@ -40,6 +66,14 @@
 'use strict';
 
 const sessionStateModule = require('./session-state.cjs');
+const { resolveSessionRecords, captureTokenUsageFromResolved } = require('./token-usage.cjs');
+const { activeMsFromEvent, activeMsFromResolved } = require('./active-time.cjs');
+
+// Cursor build: never rewrite tool inputs — there is no token usage to stamp
+// on Cursor and rewrite support is unverified in Cursor's hook protocol (see
+// the header). Flipping this to true re-enables the source's stamp paths
+// verbatim if a future Cursor release supports both.
+const SUPPORTS_UPDATED_INPUT = false;
 
 // -- Universal allowlist ----------------------------------------------------
 // Always-allowed tools regardless of active step. Forge orchestration,
@@ -143,7 +177,17 @@ const CATEGORY_PATTERNS = {
  */
 function bareName(toolName) {
   if (!toolName) return '';
-  const m = toolName.match(/^mcp__[^_]+(?:-[^_]+)*__(.+)$/);
+  // Non-greedy server segment so server names containing UNDERSCORES are
+  // stripped too — not just hyphenated connector UUIDs. The Forge plugin
+  // exposes tools under `mcp__plugin_forge_forge__forge__update_state` (and
+  // Linear under `mcp__plugin_linear_linear__…`); the old
+  // `mcp__[^_]+(?:-[^_]+)*__` pattern stopped at the first underscore and
+  // failed to strip the prefix, so `bare` stayed the full name → forge tools
+  // were neither token-stamped nor recognized as universally-allowed (they
+  // would be DENIED mid-checkpoint). The first `__` after `mcp__` is the
+  // server/tool delimiter; the tool itself may contain `__`
+  // (e.g. `forge__update_state`), which the greedy trailing group preserves.
+  const m = toolName.match(/^mcp__.+?__(.+)$/);
   return m ? m[1] : toolName;
 }
 
@@ -228,9 +272,158 @@ async function main() {
   // Scope state to this Claude Code session.
   const sessionState = sessionStateModule.forSession(event.session_id);
   const state = sessionState.read();
-  if (!state.active_workflow) return; // No workflow active — allow
-
   const bare = bareName(toolName);
+
+  // SHI-724: stamp cumulative token usage onto Forge's own
+  // forge__update_state call — the deterministic analog of the server-side
+  // duration_ms stamp. Fires for ANY tracked session: an active workflow
+  // (per-step capture) OR a logged/linked observer session (its ad_hoc and
+  // periodic-checkpoint update_state calls). Runs BEFORE the active_workflow
+  // guard below, because observer-checkpoint calls happen with
+  // active_workflow=false (the observe_session workflow has already
+  // completed), and the legacy #657 path — which relies on the MODEL relaying
+  // the Stop-hook directive's token_usage — drops them (observed: an ad_hoc
+  // session whose model never relayed, leaving null token columns). The
+  // updatedInput rewrite makes capture independent of the model.
+  //
+  // captureTokenUsage parses the local transcript (main + sub-agent files)
+  // into a CUMULATIVE raw-component snapshot; the orchestrator writes it to a
+  // separate `event_type: token_usage` row keyed by the Forge conversation
+  // (the workflow conversation, or the observe_session conversation for
+  // observer sessions) with work_item_key nullable — linked AND unlinked both
+  // captured. The snapshot is cumulative and the read side takes
+  // latest-per-session, so re-stamping never double-counts and a skipped call
+  // never under-counts.
+  //
+  // updatedInput requires Claude Code >= 2.0.10; older clients ignore it
+  // (graceful no-capture, no breakage). Fail-soft: any parse/IO error leaves
+  // the call unchanged — token capture must never block forge__update_state.
+  const trackedSession = state.active_workflow
+    || state.status === 'logged' || state.status === 'linked';
+  if (SUPPORTS_UPDATED_INPUT && bare === 'forge__update_state' && trackedSession) {
+    try {
+      let toolInput = event.tool_input || {};
+      if (typeof toolInput === 'string') toolInput = JSON.parse(toolInput);
+      const stateUpdates = { ...(toolInput.state_updates || {}) };
+      // Resolve the session log ONCE per invocation — token capture and the
+      // active-time stamp below consume the same parsed records instead of
+      // each re-reading multi-MiB transcript files (review #10).
+      const resolved = resolveSessionRecords(event);
+      const tokens = captureTokenUsageFromResolved(resolved);
+      // Track whether we enriched state_updates at all. Three independent stamps
+      // can fire on the SAME tracked update_state, and the rewrite must be
+      // emitted if ANY did:
+      //   - token_usage (only when capture succeeds),
+      //   - client_session_id (the Claude coding-session id, stamped on EVERY
+      //     tracked update_state so the read side can collapse this session's
+      //     rows across all its Forge conversations — this workflow + the
+      //     observer — instead of counting one per conversation), and
+      //   - duration_ms (R1 idle-excluded active time; active-workflow steps only).
+      let changed = false;
+      // Never clobber a token_usage the caller already set (defensive — the
+      // model does not set it today, but a future client might).
+      if (tokens && !stateUpdates.token_usage) {
+        // SHI-724 Issue 2: stamp one component bag PER model so the orchestrator
+        // writes a per-model token_usage row — a delegated session (Opus main +
+        // Sonnet sub-agent) is then weighted per model at read. Fall back to the
+        // combined single bag if an adapter lacks byModel.
+        const models = Array.isArray(tokens.byModel) && tokens.byModel.length
+          ? tokens.byModel
+          : [tokens];
+        stateUpdates.token_usage = models.map((m) => ({
+          input: m.input,
+          cache_read: m.cacheRead,
+          cache_creation_5m: m.cacheCreation5m,
+          cache_creation_1h: m.cacheCreation1h,
+          cache_creation_flat: m.cacheCreationFlat,
+          output: m.output,
+          model_name: m.modelName,
+        }));
+        changed = true;
+      }
+      // Stamp the Claude coding-session id on every tracked update_state. Don't
+      // clobber an existing one (a future client might set it itself).
+      if (!stateUpdates.client_session_id && event.session_id) {
+        stateUpdates.client_session_id = event.session_id;
+        changed = true;
+      }
+
+      // R1 active-time: stamp duration_ms with idle-excluded ACTIVE time for an
+      // active-workflow step (window = [step_active_since, now]). The server
+      // prefers state_updates.duration_ms over its wall-clock fallback
+      // (src/orchestrator.js), so this replaces wall-clock with active time on
+      // the SAME call that already carries the tokens — the client-side analog
+      // of the server's duration stamp. Scoped to active workflows: observer
+      // (logged/linked) checkpoint duration is owned by the stop-observer
+      // directive, so we don't double-source it here. `== null` guards both
+      // null and undefined so a caller-set value (incl. 0) is never clobbered;
+      // activeMsFromEvent returns null when no session log is available (Cursor
+      // / unreadable transcript) → we leave the server's wall-clock fallback.
+      if (state.active_workflow && state.step_active_since && stateUpdates.duration_ms == null) {
+        const activeMs = activeMsFromResolved(resolved, Date.parse(state.step_active_since));
+        if (Number.isFinite(activeMs)) {
+          stateUpdates.duration_ms = activeMs;
+          changed = true;
+        }
+      }
+
+      // updatedInput REPLACES the tool input (Claude Code does not merge), so
+      // echo the complete object back with the enriched state_updates — but only
+      // when we added something (token_usage, client_session_id, and/or duration_ms).
+      if (changed) {
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            updatedInput: { ...toolInput, state_updates: stateUpdates },
+          },
+        }));
+        return;
+      }
+    } catch {
+      // Fall through — allow the call unchanged.
+    }
+    return; // forge__update_state is universally allowed regardless.
+  }
+
+  // R1 active-time on the ABANDON exit. forge__abandon_workflow carries no
+  // state_updates, so without a stamp the server's __abandoned__ audit row
+  // falls back to wall-clock (now − stepStartedAt) — and abandon is the exit
+  // most correlated with walking away (start a step, pause 3h, come back and
+  // abandon → 3h of idle banked as engineering time, the exact inflation R1
+  // removes on update_state). Stamp the idle-excluded active time of the
+  // in-flight step as a top-level `duration_ms` input field; the tool handler
+  // threads it into the audit row (src/tools/abandon-workflow.js). Same
+  // guards as the update_state stamp: never clobber a caller-set value, and
+  // a null capture (Cursor / unreadable transcript) leaves the call unchanged
+  // so the server keeps its wall-clock fallback.
+  if (SUPPORTS_UPDATED_INPUT && bare === 'forge__abandon_workflow' && state.active_workflow && state.step_active_since) {
+    try {
+      let toolInput = event.tool_input || {};
+      if (typeof toolInput === 'string') toolInput = JSON.parse(toolInput);
+      if (toolInput.duration_ms == null) {
+        const activeMs = activeMsFromEvent(event, Date.parse(state.step_active_since));
+        if (Number.isFinite(activeMs)) {
+          process.stdout.write(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'allow',
+              updatedInput: { ...toolInput, duration_ms: activeMs },
+            },
+          }));
+          return;
+        }
+      }
+    } catch {
+      // Fall through — allow the call unchanged.
+    }
+    return; // abandon_workflow is universally allowed regardless.
+  }
+
+  // Beyond token stamping (above), the guard layers below apply only while a
+  // workflow is active. A logged/linked observer session that reaches here on
+  // a non-update_state tool has no per-step allowlist to enforce.
+  if (!state.active_workflow) return; // No active workflow — allow.
 
   // Universals always pass — Forge orchestration, AskUserQuestion, read-only.
   if (isUniversallyAllowed(bare)) return;

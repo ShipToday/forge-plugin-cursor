@@ -86,6 +86,13 @@ require Node.js on your `PATH`.
 > state side-effects, but its routing nudges are inert on Cursor — routing
 > relies on `forge-autopilot` skill auto-discovery instead.
 
+> Cursor also exposes no per-session model token usage to plugin hooks, so
+> Forge's token capture (available in the Claude Code and Codex plugins) is
+> unavailable on Cursor: Forge records no token data for Cursor sessions and
+> the ShipToday dashboard reports them as not measured. Engineering-time
+> checkpoints use wall-clock deltas on Cursor (no session log is available
+> for idle exclusion).
+
 ## License
 
 MIT — see `LICENSE`.
