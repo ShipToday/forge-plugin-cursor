@@ -4,6 +4,20 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-13
+
+### Added
+- **`forge-feedback` skill (new) — in-session feedback to the ShipToday
+  team.** Lets the user send feedback from inside a Cursor session: the skill
+  runs a short conversation to capture the feedback, gathers and **sanitizes**
+  relevant session context, shows the exact payload for review, lets the user
+  revise it, and sends only after explicit confirmation by calling the
+  `forge__send_feedback` MCP tool. No feedback content is persisted. The
+  delivery path is the shared Forge MCP feedback backend (the same one the
+  dashboard feedback form uses). The Cursor build localizes the confirmation
+  step to a structured user-input tool where available, matching the other
+  Cursor skills.
+
 ## [1.2.0] - 2026-06-10
 
 ### Added
