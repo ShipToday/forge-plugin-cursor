@@ -4,6 +4,26 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-15
+
+### Changed
+- **Model-routing guidance — delegate when it pays for itself, not
+  reflexively.** The `forge-autopilot` routing skill now carries a per-step
+  **Worth-it check**: when the remaining work is only replaying content
+  already computed and stored in workflow state (a pre-computed post, no new
+  generation), the step runs inline on the current model instead of
+  delegating to another tier — spawning a separate agent for a pure replay
+  just adds a round-trip. Genuine off-tier work still delegates up for
+  stronger reasoning or down to save cost.
+
+### Fixed
+- **`forge__send_feedback` is never blocked mid-workflow.** The workflow
+  guard now always allows the `forge__send_feedback` tool, so the in-workflow
+  feedback step and the `forge-feedback` skill can deliver feedback even
+  during a checkpoint or when a step's tool allowlist would otherwise gate it.
+  Previously it was permitted only by the fail-open path for unknown tools,
+  which broke the moment it was called mid-checkpoint.
+
 ## [1.3.0] - 2026-06-13
 
 ### Added
