@@ -4,6 +4,27 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-06-17
+
+### Fixed
+- **`workflow-tracker.cjs` — the passive observer no longer fires during a
+  workflow preflight prompt.** When `forge__start_workflow` returns a
+  clarification prompt (disambiguation, team selection, key/name confirmation,
+  recommendation, or intent classification) instead of starting a workflow,
+  the response carries no `Conversation ID`. The tracker previously left the
+  session looking untracked, so the next `stop` hook fired the session
+  observer — stacking a "track this work?" nudge on top of the clarification
+  the user was still answering. This was especially jarring on Cursor, which
+  surfaces the `stop` hook's block reason to the user verbatim. The tracker
+  now treats any `forge__start_workflow` response without a `Conversation ID`
+  as a preflight and blocks the observer for that turn; the per-turn re-arm
+  still lets it fire later if the user abandons the preflight.
+- **`workflow-tracker.cjs` — the namespaced routing skill id is ignored in
+  the local-skill audit.** The `forge-autopilot` ignore-guard compared the
+  bare id only, so a namespaced form (`<namespace>:forge-autopilot`) slipped
+  through and recorded the router itself into `skill_invocations`. The guard
+  now compares the bare id after stripping any namespace prefix.
+
 ## [1.4.0] - 2026-06-15
 
 ### Changed
