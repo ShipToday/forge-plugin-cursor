@@ -4,6 +4,24 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-18
+
+### Fixed
+- **`workflow-tracker.cjs` — the observer's classified SDLC stage is now
+  persisted, so engineering-time checkpoints stop defaulting to "Other".** The
+  session observer classifies each session's SDLC stage (e.g. design,
+  implementation) once at observe time, but that value was only stamped on the
+  single observation audit row — it was never written to the per-session state.
+  `stop-observer.cjs` builds its periodic engineering-time checkpoint with
+  `sdlc_stage` read from that state, defaulting to `other` when absent, so every
+  checkpoint heartbeat fell back to "Other". Since checkpoints carry the bulk of
+  a session's banked engineering time, the ShipToday dashboard's per-stage time
+  charts attributed almost all of a session's time to "Other" even when it was
+  classified otherwise. The tracker now persists the classified stage alongside
+  the status it already writes (without letting a heartbeat's own `other`
+  fallback clobber a previously persisted stage). Go-forward only; totals, the
+  linked/unlinked split, and work-item lifecycle state are unchanged.
+
 ## [1.5.0] - 2026-06-17
 
 ### Fixed
