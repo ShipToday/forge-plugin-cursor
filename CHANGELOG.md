@@ -4,6 +4,29 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-06-21
+
+### Fixed
+- **`stop-observer.cjs` / `workflow-tracker.cjs` — a Forge step no longer
+  stalls when a local skill runs mid-workflow (SHI-787).** When a workflow
+  step invoked a local skill (e.g. a required security review) whose prompt
+  said "reply with only its output", the model could end its turn without
+  calling `forge__update_state`, leaving the step silently incomplete.
+  `workflow-tracker.cjs` now arms a continuation backstop whenever a local
+  skill runs while a workflow is active, and clears it on any
+  `forge__update_state`. If the turn ends with the backstop still armed (and
+  the session is not paused at a legitimate question/confirmation checkpoint),
+  `stop-observer.cjs` blocks the stop **once** and directs the model to relay
+  the skill's findings and call `forge__update_state` — a skill's "nothing
+  else" instruction governs its output format, not the workflow turn boundary.
+  The single-fire guard means it can never loop.
+
+### Changed
+- **`forge-autopilot` routing now recognizes architecture-mapping work.** The
+  skill description was sharpened so requests to map or document system
+  architecture, reconstruct an architecture estate, or build an architecture
+  atlas route into Forge.
+
 ## [1.6.0] - 2026-06-18
 
 ### Fixed
