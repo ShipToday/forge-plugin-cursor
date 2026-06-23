@@ -4,6 +4,22 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-06-23
+
+### Fixed
+- **`workflow-guard.cjs` — `forge__abandon_workflow` now stamps
+  `client_session_id` so the `__abandoned__` audit row joins its coding session
+  (SHI-378).** When a workflow was abandoned, the audit row wrote
+  `client_session_id = NULL`, which fragmented it off its coding session on the
+  read side (`COALESCE(client_session_id, session_id)`) and stranded the step's
+  time in the Token Intelligence drilldown's "no measured AI spend" footnote.
+  The abandon branch now stamps the coding-session id (from the stop event's
+  session id) regardless of whether a workflow step is active, mirroring the
+  Claude Code source. **On Cursor this stays dormant** — the build emits no
+  input rewrites (`SUPPORTS_UPDATED_INPUT = false`), so abandon rows keep the
+  server's wall-clock fallback; the gated code is kept in sync so it lights up
+  automatically if a future Cursor release supports input rewrites.
+
 ## [1.7.0] - 2026-06-21
 
 ### Fixed
