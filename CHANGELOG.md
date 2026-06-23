@@ -4,11 +4,27 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-06-23
+
+### Fixed
+- **`workflow-guard.cjs` — `forge__abandon_workflow` now stamps
+  `client_session_id` so the `__abandoned__` audit row joins its coding
+  session.** When a workflow was abandoned, the audit row wrote
+  `client_session_id = NULL`, which fragmented it off its coding session on the
+  read side (`COALESCE(client_session_id, session_id)`) and stranded the step's
+  time in the Token Intelligence drilldown's "no measured AI spend" footnote.
+  The abandon branch now stamps the coding-session id (from the stop event's
+  session id) regardless of whether a workflow step is active, mirroring the
+  Claude Code source. **On Cursor this stays dormant** — the build emits no
+  input rewrites (`SUPPORTS_UPDATED_INPUT = false`), so abandon rows keep the
+  server's wall-clock fallback; the gated code is kept in sync so it lights up
+  automatically if a future Cursor release supports input rewrites.
+
 ## [1.7.0] - 2026-06-21
 
 ### Fixed
 - **`stop-observer.cjs` / `workflow-tracker.cjs` — a Forge step no longer
-  stalls when a local skill runs mid-workflow (SHI-787).** When a workflow
+  stalls when a local skill runs mid-workflow.** When a workflow
   step invoked a local skill (e.g. a required security review) whose prompt
   said "reply with only its output", the model could end its turn without
   calling `forge__update_state`, leaving the step silently incomplete.
@@ -103,8 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - 2026-06-10
 
 ### Added
-- **`token-usage.cjs` (new) — per-session token-capture adapters
-  (SHI-378 / SHI-724).** Shared library deriving a cumulative raw-component
+- **`token-usage.cjs` (new) — per-session token-capture adapters.**
+  Shared library deriving a cumulative raw-component
   token snapshot (input / cache reads / cache creation / output, attributed
   per model) from a local AI-client session log. **On Cursor this always
   resolves to `null` by design:** Cursor exposes no per-session model token
@@ -168,7 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **`stop-observer.cjs` — `FORGE OBSERVATION` directive trimmed to a
-  concise form (SHI-760).** The `stop` hook previously emitted a
+  concise form.** The `stop` hook previously emitted a
   ~30-line block enumerating the full SDLC activity taxonomy and a
   false-negative checklist. That taxonomy now lives server-side in the
   `session_observer` skill, so the hook carries only the short
@@ -179,7 +195,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **`workflow-tracker.cjs` — `observation_disabled` gate no longer maps
   to `logged`.** The 1.1.5 backstop routed the `observation_disabled`
-  outcome (org-admin opted out of observation, SHI-758/SHI-759) through
+  outcome (org-admin opted out of observation) through
   `OUTCOME_TO_STATUS` to `logged`. Marking a disabled org as `logged`
   made `stop-observer.cjs` treat the session as tracked and fire
   periodic engineering-time checkpoints for it. The gate is now
@@ -192,14 +208,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.5] - 2026-05-28
 
 ### Added
-- **`session-state.cjs` — per-session observation gate cache (SHI-759).**
+- **`session-state.cjs` — per-session observation gate cache.**
   A new `forge_observation_enabled` field stores the org-admin's
   observation toggle for the session. When `false`, `stop-observer.cjs`
   short-circuits silently on subsequent Stops so the observer doesn't
   re-invoke `session_observer` — zero MCP round-trips for the steady
   state. Field name is shared verbatim with the Cursor stop-observer
   for parity.
-- **`stop-observer.cjs` — Step 3b gate (SHI-759).** Reads the new
+- **`stop-observer.cjs` — Step 3b gate.** Reads the new
   `forge_observation_enabled` cache flag before the snoozed-session
   re-fire path. Exits silently when the admin has opted out of
   observation for the org. Placed AFTER the linked/logged checkpoint
@@ -207,9 +223,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   continues independently of the observation toggle.
 - **`workflow-tracker.cjs` — `observation_disabled` outcome backstop.**
   The `OUTCOME_TO_STATUS` map now recognises the
-  `observation_disabled` outcome (org-admin gate fired,
-  SHI-758/SHI-759), maps it to `logged`, and pins the per-session
-  `forge_observation_enabled: false` cache flag so the SHI-759
+  `observation_disabled` outcome (org-admin gate fired),
+  maps it to `logged`, and pins the per-session
+  `forge_observation_enabled: false` cache flag so the
   stop-observer Step 3b read can short-circuit subsequent Stops
   without an MCP round-trip. Backstop for the documented
   gated-payload state write — if the AI parent forgets, this hook
@@ -271,7 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`forge-workflow` skill — team-scope error code renamed.** The
   `team_membership_required` error code (caller not a member of the
   target team) has been replaced with `team_not_in_org` (target team
-  belongs to a different organization). SHI-749 broadens admin
+  belongs to a different organization). This broadens admin
   authority over team-scoped workflow overrides so org admins can
   manage any team in their own org, regardless of personal team
   membership. The error tables in both the Create path and Delete
