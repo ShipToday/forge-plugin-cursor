@@ -4,6 +4,18 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-07-02
+
+### Changed
+- **`forge-workflow` skill — authored workflows now always close with a
+  `session_feedback` step.** The workflow-authoring guidance instructs the
+  AI author to append (or move) `session_feedback` to the final step and
+  surface it in the proposal, so custom org/team workflows end with the same
+  end-of-session recap every Forge default workflow uses. This release also
+  brings the skill's team-scope wording (an org admin can target any team in
+  the org) and the `example_invocation` `forge, ` wake-word guidance in line
+  with the current Forge source.
+
 ## [1.8.0] - 2026-06-23
 
 ### Fixed
