@@ -4,6 +4,49 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-07-18
+
+### Added
+- **Admission proposal — workflows are validated before they activate.** A
+  post-classification `forge__start_workflow` call now returns a server-resolved
+  workflow *proposal* instead of immediately creating an active conversation.
+  The assistant compares the proposed entry step, missing inputs, configured
+  path, and potential side effects against the full conversation before
+  confirming with the returned `admission_token` and `start_confirmed: true`.
+  When the proposal does not fit, nothing has started — so there is no workflow
+  to abandon and no token is spent on a run the user did not want.
+
+### Changed
+- **Client-side catalog routing contract.** Forge now returns the enabled
+  workflow catalog for the current user and organization and lets the client
+  choose among it, rather than routing server-side. If one workflow clearly
+  matches, the assistant re-calls with that explicit catalog workflow id and
+  `classification_complete: true`; if several are plausible, it presents only
+  the relevant catalog workflows and re-calls after the user picks. Inventing a
+  workflow, surfacing a server-side skill id as an option, or setting
+  `classification_complete: true` without an explicit `workflow` are all now
+  explicitly disallowed.
+- **Continuation boundary — Forge stays out of already-scoped coding work.**
+  The assistant now reads the whole conversation, not just the latest sentence,
+  to tell a new SDLC outcome from continuation of work already scoped. Applying
+  review comments, resolving a merge conflict, editing known files, adding
+  already-specified tests, and committing/pushing/updating a PR are handled
+  normally without starting a workflow. A tracked work item key that appears
+  only in earlier turns no longer pulls the request back into Forge — the
+  distinction is the requested outcome: *review this PR* is workflow-shaped,
+  *apply these review changes and update the PR* is coding continuation.
+- **`follow_up` chaining generalized to every workflow.** Reading the
+  `follow_up` object on completion was previously documented as a
+  session-observer behaviour; status reports and observer outcomes now share
+  one structured handoff contract, so any workflow that returns a non-null
+  `follow_up` chains before the original request resumes.
+- **Workflow authoring carries over observed friction instead of re-asking.**
+  When a Forge run recap ends with a friction insight and the admin takes it up
+  ("customize my workflow"), the authoring flow no longer asks its opening
+  intake question — the insight already answered it. It states what it is
+  carrying over so the inference is visible rather than silent, and proceeds.
+  Absence of an insight is the ordinary case, never an error or a blocker.
+
 ## [1.10.0] - 2026-07-17
 
 ### Fixed
