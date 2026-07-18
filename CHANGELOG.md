@@ -4,6 +4,33 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-07-17
+
+### Fixed
+- **`workflow-tracker.cjs` — the session observer no longer re-nudges on every
+  turn after a session is linked to an already-complete work item.** The hook
+  derived the local tracking status only from its outcome map, which
+  deliberately omits `linked`/`created` on the assumption that those always
+  launch a follow-up workflow (which sets `active_workflow`). When the Link
+  path sets `follow_up: null` — linking to an item that needs no further work —
+  no workflow launches, so the status stayed `null` and `stop-observer.cjs`
+  re-fired the tracking nudge on every subsequent stop. The hook now prefers
+  the status the observer skill already declares in `final_session_state.status`,
+  validated against the known set (`logged`, `linked`, `snoozed`, `dismissed`),
+  and falls back to the outcome map only for older payloads that carry no
+  `final_session_state`. The `ad_hoc`, `snoozed`, and `dismissed` outcomes are
+  unchanged, and a bare `linked` with no declared final state still resolves to
+  `null` as before.
+
+### Changed
+- **`forge-autopilot` — the documented model-routing example now names the
+  GPT-5.6 family.** OpenAI shipped GPT-5.6 (Sol/Terra/Luna) on 2026-07-09 and
+  Forge's tier map was retargeted to it, but the skill's illustrative
+  `**Model Routing**` line still showed the superseded `gpt-5.4`. This updates
+  the documented example only — tier selection, model recognition, and pricing
+  are all resolved on the server, so the routing signal itself was already
+  current.
+
 ## [1.9.0] - 2026-07-02
 
 ### Changed
