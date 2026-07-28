@@ -4,6 +4,36 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-07-26
+
+### Added
+- **Must-display blocks are now an explicit contract.** Forge marks content
+  meant for *you* — the "what to expect" preflight brief and the per-step
+  "Step N of M" progress marker — by wrapping it in a
+  `<<<FORGE_DISPLAY_VERBATIM>>>` relay envelope. The routing skill now
+  documents that contract directly: render the block verbatim, before
+  anything else in the turn, and never fold it into a delegated sub-agent
+  prompt. A dogfooding run found these markers were being dropped silently,
+  leaving no visible sign of how far a multi-step run had progressed.
+- **`admin_only` visibility guidance for workflow authoring.** The workflow
+  authoring skill now treats `admin_only` as an explicit either/or question
+  rather than something to infer, and spells out how it differs from
+  `default_roles` (a recommendation, not a restriction) and why omitting the
+  field is not the same as sending `false`.
+
+### Changed
+- **Delegation now states who owns the content above the delimiter.**
+  Everything above `---DELEGATE BELOW---` is addressed to the parent, not the
+  sub-agent — previously only the *below*-delimiter half was described, which
+  left must-display blocks belonging to nobody on a delegated step.
+
+### Note for Cursor
+Other Forge clients ship a `postToolUse` hook that surfaces must-display blocks
+automatically as a backstop. Cursor's `postToolUse` has no user-visible output
+channel — its output is agent-facing context — so that hook is intentionally
+**not** included here. On Cursor the assistant rendering the block is the only
+mechanism, which is why the guidance above is stated explicitly in the skill.
+
 ## [1.11.0] - 2026-07-18
 
 ### Added
