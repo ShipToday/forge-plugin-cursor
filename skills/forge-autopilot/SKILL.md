@@ -468,9 +468,10 @@ it in a relay envelope:
 > **Relay to the user** — render the block between the sentinels below ...
 
 <<<FORGE_DISPLAY_VERBATIM id="position">>>
-+==========================================================+
-**Step 2 of 8: Discover AI SDLC** — next: ... · then: ...
-+==========================================================+
+### Step 2 of 8: Discover AI SDLC
+next: ... · then: ...
+
+---
 <<<END FORGE_DISPLAY_VERBATIM>>>
 ```
 
