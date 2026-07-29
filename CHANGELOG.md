@@ -4,6 +4,23 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-07-28
+
+### Changed
+- **Progress markers are readable markdown instead of ASCII art.** The
+  "what to expect" preflight brief and the per-step "Step N of M" marker were
+  wrapped in a pair of 60-character `+====+` rules. Cursor renders markdown,
+  so that showed up as literal punctuation — noise rather than structure. The
+  marker is now a proper heading with the next/then trail beneath it, closed
+  by a `---` break: bigger on screen, navigable by a screen reader, and a
+  fraction of the size on the wire.
+- **The routing skill now defers to a display hook when one exists.** On
+  clients where Forge's `must-display` hook renders these blocks itself, it
+  returns a notice saying so, and the skill is told not to render them a
+  second time. Cursor ships no `must-display` hook, so nothing changes here in
+  practice — the model remains the only display channel and continues to
+  render the blocks itself, as it should.
+
 ## [1.12.0] - 2026-07-26
 
 ### Added
