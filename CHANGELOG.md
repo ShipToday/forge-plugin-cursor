@@ -4,6 +4,20 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-07-31
+
+### Added
+- **Workflow authoring now proposes an SDLC stage for the workflow itself.**
+  Forge already asked for a stage on each new skill; the workflow it belonged to
+  had none, so the dashboard reconstructed one from the workflow name — which
+  could never be right for a workflow you authored, because it is in no list of
+  built-in names. A workflow you create now carries a real stage from the start,
+  and shows its true badge, group and filter position instead of falling into
+  "Other". The guidance is explicit that the stage follows the workflow's
+  PURPOSE rather than a tally of its steps: scaffolding steps like handoff and
+  session feedback appear in workflows of every kind, so counting them reliably
+  mislabels the result.
+
 ## [1.13.1] - 2026-07-29
 
 ### Fixed
