@@ -4,6 +4,18 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.2] - 2026-08-08
+
+### Fixed
+- **The workflow-authoring guidance no longer refers to ShipToday's own
+  internals.** Several passages named internal database tables, an internal
+  issue key, and internal release-phase labels — none of which mean anything
+  outside ShipToday's codebase. One was also simply wrong: the save-workflow
+  warnings pointed at a `preset_steps.*` field that does not exist in the
+  payload you submit. Warnings now name the field you actually wrote
+  (`workflow.steps.*`), and an empty SDLC-stage list is explained in plain
+  terms rather than by naming an internal data-loading phase.
+
 ## [1.14.1] - 2026-08-07
 
 ### Fixed
