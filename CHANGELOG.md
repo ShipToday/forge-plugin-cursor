@@ -4,6 +4,27 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.1] - 2026-08-07
+
+### Fixed
+- **Token capture no longer goes silently dark when session state is lost.**
+  A long session could run its whole length recording nothing, even though the
+  transcripts were complete the entire time — every capture path sat behind
+  session state that had quietly been discarded. Two independent causes, both
+  fixed: the state file was keyed on the working directory as well as the
+  session, so touching a second repository mid-session re-keyed it and orphaned
+  everything written so far (it now keys on the session alone); and staleness
+  was measured from session start, so a session that simply ran longer than the
+  expiry had its in-flight workflow state wiped mid-run (expiry now measures
+  from the last write, which is what session-boundary detection actually means).
+- **Usage stamping no longer inherits those failure modes.** Recording usage no
+  longer requires a tracked-session flag to have survived in state — by the time
+  that code runs a Forge conversation exists by construction, and everything the
+  capture needs comes from the event itself.
+- **Engineering-time checkpoints now work for organizations with observation
+  disabled.** The checkpoint was gated behind a status those organizations never
+  reach, so it never fired for them.
+
 ## [1.14.0] - 2026-07-31
 
 ### Added
