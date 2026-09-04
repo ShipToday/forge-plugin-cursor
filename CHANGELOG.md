@@ -4,6 +4,38 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-09-04
+
+### Changed
+- **The mid-session tracking offer now waits until there is something to
+  talk about.** It used to become eligible at the end of the very first
+  turn, before anything was known about the session, which read as
+  onboarding noise. It now holds back until the session has run 4 turns,
+  accumulated 5 minutes of active work, or produced a commit — whichever
+  comes first. Where the session log cannot be read, the gate degrades to
+  turns only and never to wall-clock: a session left open for hours with a
+  single turn has produced no signal.
+- **The offer explains why it is appearing now**, quoting the same elapsed
+  figures that made it eligible, and reading as prose rather than a
+  template — "going for 1 turn", not "1 turns".
+
+### Fixed
+- **Turning the offer down is no longer permanent.** "Not now" and "stop
+  asking" were previously the same event, so a single reflexive decline
+  disabled tracking for the rest of the session — including at the moment
+  it would have been useful. A soft decline now comes back later, and only
+  an explicit opt-out is terminal. When the offer returns it says that you
+  already declined once rather than repeating itself word for word.
+- **A commit made during the very first turn now counts.** The baseline
+  that commits are measured against is established when the session starts
+  rather than when it ends, so work done before the first pause is no
+  longer invisible.
+- **Commits are detected from subdirectories and inside worktrees.** The
+  repository lookup previously checked only the current directory, so a
+  session started in a package or `src/` folder never saw a commit. It now
+  walks up to the enclosing checkout, stopping at your home directory so a
+  dotfiles repository is never mistaken for the project you are working in.
+
 ## [1.15.0] - 2026-08-25
 
 ### Changed
