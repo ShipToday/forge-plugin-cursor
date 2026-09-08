@@ -4,6 +4,37 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-09-07
+
+### Added
+- **An independence check for steps whose job is to judge.** Tier asks
+  whether a model is strong enough; it never asked whether the reviewer
+  should be someone who has already seen the work. A reviewer who produced
+  the artifact reads what they *meant* to write, and "I already hold the
+  context" — normally a reason to stay inline — is the disqualification on
+  a review step, not the qualification. Steps now carry an independence
+  check above their delegation rules, covering judgments of your own
+  conclusions as well as your own code. Where a fresh reviewer is not
+  available the step still runs, but it is labelled as a self-review
+  rather than passing as an independent one.
+- **Splitting a step, rather than handing over all of it.** A judgment can
+  now go to a fresh agent while the gate, the rendering, and the state
+  hand-off stay with the parent — previously the whole step had to travel,
+  which forced the sub-agent to relay the entire envelope back.
+
+### Changed
+- **Abandoning is no longer a way to end a run early.** When a post-step
+  confirmation gate is pending it already offers **Stop here**, which ends
+  the run, keeps everything produced, and records which steps did not run.
+  That gate is now relayed to you instead of being pre-empted by a decision
+  that the remaining steps looked unnecessary.
+
+### Fixed
+- **The description of what abandoning does was wrong.** It claimed to
+  leave a stale flag behind that would haunt later prompts. Abandoning
+  closes the run for good: the steps that had not run are recorded as not
+  run, the audit trail records the abandonment, and nothing resumes it.
+
 ## [1.17.0] - 2026-09-04
 
 ### Changed
