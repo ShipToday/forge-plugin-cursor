@@ -4,6 +4,26 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-09-09
+
+### Changed
+- **Vague requests are asked what they should produce before anything is
+  matched.** A request that names no outcome and no lifecycle verb ("help
+  me with the roadmap") now gets one question — what should exist when the
+  work is done — with options phrased as outcomes the catalog can deliver,
+  never workflow ids. Clear requests ("review this PR", "plan the fix") skip
+  it. The ask is reported as `routing_ask` with scope `outcome`.
+- **A workflow fits only when it would deliver the named outcome.** One that
+  would merely get you near it by a different route is a no-match, not a
+  candidate, so a request nothing covers is no longer answered with a menu
+  of adjacent workflows.
+- **Org admins are offered "Build a custom workflow" on the same dialog as
+  the candidates**, immediately before "None of these fit", instead of two
+  dialogs later. At most two candidates are shown when both are present.
+  Forge decides per caller whether the option appears; members never see
+  it. When it was shown, the reported `routing_ask` carries
+  `authoring_offered: true`.
+
 ## [1.18.0] - 2026-09-07
 
 ### Added
