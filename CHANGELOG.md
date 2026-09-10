@@ -4,6 +4,29 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-09-10
+
+### Fixed
+- **Declining a question no longer strands the run.** A question you skip or
+  dismiss now settles the way the step it belongs to defines, instead of
+  being rejected as an invalid answer while the guidance forbade both
+  re-asking it and picking a default for you. Only a question a step marks as
+  genuinely required still refuses to move on, and it now says so plainly
+  rather than asking again.
+- **A dismissal means the same thing however Cursor reports it.** An empty
+  answer and an explicit decline resolve identically, so the outcome no
+  longer depends on which route the answer arrived by.
+- **"Record TBD and move on" is gone.** Nothing converts a dismissal, a
+  delivery failure, empty input or a preselected default into an answer or an
+  approval — a timeout or transport error leaves the question genuinely
+  unanswered instead of choosing a branch for you.
+
+### Changed
+- The workflow guard recognises the host's own question tools, so relaying a
+  question is never blocked mid-step.
+- The workflow tracker recognises the two additional checkpoint headers Forge
+  can now return, so a paused run is tracked correctly.
+
 ## [1.19.0] - 2026-09-09
 
 ### Changed
