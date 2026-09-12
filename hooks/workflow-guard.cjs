@@ -41,7 +41,8 @@
  * token columns on ad_hoc/checkpoint rows).
  *
  * Hook contract: PreToolUse hooks may emit a JSON payload on stdout —
- * `{decision: "deny", reason: "..."}` to refuse the tool, or
+ * `{hookSpecificOutput: {permissionDecision: "deny", permissionDecisionReason: "..."}}`
+ * to refuse the tool, or
  * `{hookSpecificOutput: {permissionDecision: "allow", updatedInput: {…}}}`
  * to rewrite the tool input (Claude Code >= 2.0.10). Anything else (silence,
  * exit code 0) allows the call to proceed unchanged.
@@ -104,6 +105,10 @@ const ALWAYS_ALLOWED_BARE_NAMES = new Set([
   'Glob',
   'TodoWrite',
   'mark_chapter',
+  // Deferred Forge discovery and local recovery/coordination. This is a
+  // narrow host-tool list, not permission for connector writes.
+  'ToolSearch', 'Skill', 'ScheduleWakeup', 'Monitor', 'TaskOutput', 'ListAgents',
+  'Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
   // Internal session tooling
   'spawn_task',
 ]);
@@ -209,6 +214,17 @@ function isUniversallyAllowed(bare) {
   return false;
 }
 
+function isBoundedReadShell(event, bare) {
+  if (!['Bash', 'PowerShell'].includes(bare)) return false;
+  let input = event.tool_input || {};
+  try { if (typeof input === 'string') input = JSON.parse(input); } catch { return false; }
+  const command = String(input.command || '').trim();
+  if (!command || command.length > 800 || /[;&|`]|\$\(|\r|\n/.test(command)) return false;
+  if (/\b(rm|del|erase|mv|move|cp|copy|mkdir|rmdir|touch|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|git\s+(commit|push|reset|checkout|clean))\b/i.test(command)) return false;
+  return /^(?:pwd|Get-Location|git\s+(?:status|log|diff|show)|(?:Get-Content|Select-String|Get-ChildItem|rg|findstr|type|dir)\b)/i.test(command)
+    && /(?:\bhead\s+-n\s+\d+\b|\bSelect-Object\s+-First\s+\d+\b|\b-n\s+\d+\b|\b--max-count[= ]\d+\b)/i.test(command);
+}
+
 /**
  * Does the bare tool name match any pattern in the allowed categories?
  * Returns the matching category or null. If null, the tool either belongs
@@ -231,19 +247,26 @@ function isAllowedByStepPermissions(bare, allowedCategories) {
 }
 
 function buildCheckpointDenyReason(state, toolName) {
+  const responseField = state.pending_checkpoint_response_field || 'gate_answer';
   const lines = [
     `Forge workflow is at a CHECKPOINT awaiting user input (skill="${state.pending_checkpoint_step || 'unknown'}").`,
     `Tool "${toolName}" cannot proceed until the user has answered.`,
     ``,
     'You have three options:',
     '  1. Call AskUserQuestion to relay the pending question to the user.',
-    '  2. Call forge__update_state with the user\'s answer (set state_updates.user_answer).',
+    `  2. Call forge__update_state with the user's answer (set state_updates.${responseField}).`,
     '  3. Call forge__abandon_workflow with a meaningful reason ONLY if the workflow itself no longer applies (wrong workflow, user redirected).',
     '     Never abandon to skip the remaining steps: a post-step confirmation gate already offers the user "Stop here" for that — relay it.',
     ``,
     'Do NOT silently bypass the workflow. The audit trail is how the team learns when workflows misroute.',
   ];
   return lines.join('\n');
+}
+
+function deny(reason) {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: {
+    hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason,
+  } }));
 }
 
 function buildStepPermissionDenyReason(state, toolName, category) {
@@ -470,14 +493,11 @@ async function main() {
   if (!state.active_workflow) return; // No active workflow — allow.
 
   // Universals always pass — Forge orchestration, AskUserQuestion, read-only.
-  if (isUniversallyAllowed(bare)) return;
+  if (isUniversallyAllowed(bare) || isBoundedReadShell(event, bare)) return;
 
   // Layer 1: CHECKPOINT enforcement.
   if (state.pending_checkpoint) {
-    process.stdout.write(JSON.stringify({
-      decision: 'deny',
-      reason: buildCheckpointDenyReason(state, bare),
-    }));
+    deny(buildCheckpointDenyReason(state, bare));
     return;
   }
 
@@ -485,10 +505,7 @@ async function main() {
   if (Array.isArray(state.current_step_tools) && state.current_step_tools.length > 0) {
     const category = categoryFor(bare);
     if (category && !state.current_step_tools.includes(category)) {
-      process.stdout.write(JSON.stringify({
-        decision: 'deny',
-        reason: buildStepPermissionDenyReason(state, bare, category),
-      }));
+      deny(buildStepPermissionDenyReason(state, bare, category));
       return;
     }
   }

@@ -258,9 +258,12 @@ user has answered are:
 - `forge__update_state` — advance with the user's answer
 - `forge__abandon_workflow` — exit when the workflow no longer applies (see
   below; it is not a way to end a run early)
-- Read-only inspection: filesystem reads, search, web fetch/search when
-  available, plus read-only MCP tools (names starting with `list_`, `get_`,
+- Read-only inspection: filesystem reads and search, plus read-only MCP tools
+  (names starting with `list_`, `get_`,
   `search_`, `query_`, `fetch_`, `notion-search`, `notion-fetch`)
+- Recovery and coordination may use `ToolSearch`, `Skill`, waiting tools and
+  the host task tools. They do not authorize connector writes or workflow
+  advancement.
 
 **Layer 2 — Per-step `tool_permissions`.** Every step transition publishes
 a `**Tool Permissions**: cat1, cat2, …` line listing the categories the
@@ -289,9 +292,9 @@ silently rewrite the ticket.
 Anything denied gets an actionable reason that points at the three
 legitimate next moves: relay the user question, advance
 (`forge__update_state`), or abandon (`forge__abandon_workflow` — only when
-the workflow itself no longer applies). This makes silent bypass hard to do
-by accident. It is not a security boundary: `forge__abandon_workflow` is
-always allowed, and a host that wraps MCP calls may not expose every call
+the workflow itself no longer applies). The hook format and host wrappers can
+limit enforcement, so this is not a security boundary; it does not authorize
+an otherwise blocked call.
 to the hook.
 
 If you receive a deny decision for a tool you genuinely need, the right
