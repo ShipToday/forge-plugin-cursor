@@ -36,7 +36,6 @@
  *      (re-prompts user to track)
  *   5. Exit if dismissed (terminal — never re-fires)
  *   5b. Exit if status is set (observer already ran — defensive guard)
- *   6. Exit if active_workflow (workflow tracks its own time)
  *   7. Exit if observer_blocked (already evaluated this session)
  *   8. Set observer_blocked = true in session state
  *   9. Block with reason directing Claude to evaluate and invoke session_observer
@@ -455,6 +454,10 @@ async function main() {
   // so the rest of THAT session stays silent.
   if (state.forge_observation_enabled === false) return;
 
+  // A prior snooze does not override a live workflow or its question hold.
+  // Preserve the snooze until the workflow has finished.
+  if (state.active_workflow || state.pending_checkpoint) return;
+
   // Step 4: Snoozed sessions — re-fire observer every CHECKPOINT_INTERVAL turns
   if (state.status === 'snoozed') {
     const turnsSinceLast = state.turn_count - (state.last_observer_turn || 0);
@@ -492,9 +495,6 @@ async function main() {
   // already ran. Don't re-fire the initial observation. This catches edge cases
   // where status was set (by workflow-tracker) but observer_blocked was reset.
   if (state.status) return;
-
-  // Step 6: Workflow actually started (set by forge-autopilot, not prompt-router)
-  if (state.active_workflow) return;
 
   // Step 7: Already blocked once this session — don't re-block
   if (state.observer_blocked) return;
