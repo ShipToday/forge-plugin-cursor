@@ -4,6 +4,30 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-09-11
+
+### Fixed
+- **A snoozed session stays quiet while a workflow is still running.** Asking
+  to be reminded later no longer lets the session-tracking nudge interrupt a
+  live run or a question that run is waiting on — the snooze now holds until
+  the workflow has actually finished.
+- **A run is only called finished when Forge says it is.** Progress text that
+  merely looked like a completion line — including step counts quoted back
+  inside wrapper logs — no longer ends the run early. A checkpoint or
+  next-step marker always takes precedence, so a paused run keeps its hold
+  until it genuinely advances.
+- **Tool events from hosts that wrap calls are read reliably.** Wrapped or
+  re-encoded tool calls are normalized before they touch session state, and
+  an ambiguous one is ignored rather than recorded as something it was not.
+
+### Changed
+- Sub-agent results are surfaced more usefully. Work meant for you — the
+  deliverables and findings a step designates — is shown in full, while the
+  internal bookkeeping a sub-agent returns alongside it (workflow state,
+  catalogs, next-step instructions) is no longer dumped into the conversation.
+  Code and structured output are still shown whenever you asked for them or
+  they are the material under review.
+
 ## [1.20.0] - 2026-09-10
 
 ### Fixed
