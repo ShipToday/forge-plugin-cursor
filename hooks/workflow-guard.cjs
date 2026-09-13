@@ -107,7 +107,7 @@ const ALWAYS_ALLOWED_BARE_NAMES = new Set([
   'mark_chapter',
   // Deferred Forge discovery and local recovery/coordination. This is a
   // narrow host-tool list, not permission for connector writes.
-  'ToolSearch', 'Skill', 'ScheduleWakeup', 'Monitor', 'TaskOutput', 'ListAgents',
+  'ToolSearch', 'Skill', 'ScheduleWakeup', 'TaskOutput', 'ListAgents',
   'Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
   // Internal session tooling
   'spawn_task',
@@ -181,7 +181,7 @@ const CATEGORY_PATTERNS = {
   ],
 
   code_edit:    [/^Edit$/, /^Write$/, /^NotebookEdit$/],
-  shell:        [/^Bash$/, /^PowerShell$/],
+  shell:        [/^Bash$/, /^PowerShell$/, /^Monitor$/],
 };
 
 // -- Helpers ----------------------------------------------------------------
@@ -218,11 +218,39 @@ function isBoundedReadShell(event, bare) {
   if (!['Bash', 'PowerShell'].includes(bare)) return false;
   let input = event.tool_input || {};
   try { if (typeof input === 'string') input = JSON.parse(input); } catch { return false; }
-  const command = String(input.command || '').trim();
-  if (!command || command.length > 800 || /[;&|`]|\$\(|\r|\n/.test(command)) return false;
-  if (/\b(rm|del|erase|mv|move|cp|copy|mkdir|rmdir|touch|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|git\s+(commit|push|reset|checkout|clean))\b/i.test(command)) return false;
-  return /^(?:pwd|Get-Location|git\s+(?:status|log|diff|show)|(?:Get-Content|Select-String|Get-ChildItem|rg|findstr|type|dir)\b)/i.test(command)
-    && /(?:\bhead\s+-n\s+\d+\b|\bSelect-Object\s+-First\s+\d+\b|\b-n\s+\d+\b|\b--max-count[= ]\d+\b)/i.test(command);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const command = typeof input.command === 'string' ? input.command.trim() : '';
+  // Recognize whole command shapes, not a safe-looking suffix. In particular,
+  // never interpret shell syntax, output options, preprocessors, or Git config.
+  if (!command || command.length > 800 || /[;&|`$<>(){}\[\]#%\r\n]/.test(command)) return false;
+  if (/^(?:pwd|Get-Location)$/i.test(command)) return true;
+  const bounded = value => /^[1-9]\d{0,2}$/.test(value) && Number(value) <= 200;
+  const args = command.split(/\s+/);
+  if (args.shift()?.toLowerCase() === 'git') {
+    if (args[0] === '--no-pager') args.shift();
+    const verb = args.shift();
+    if (verb === 'status') {
+      const flags = new Set(['--short', '--branch', '--porcelain', '--porcelain=v1', '--porcelain=v2']);
+      return args.length <= 2 && args.every(flag => flags.has(flag)) && new Set(args).size === args.length;
+    }
+    if (verb === 'log') {
+      const flags = args.filter(flag => flag !== '--oneline');
+      if (args.length - flags.length > 1) return false;
+      return (flags.length === 2 && ['-n', '--max-count'].includes(flags[0]) && bounded(flags[1]))
+        || (flags.length === 1 && /^--max-count=/.test(flags[0]) && bounded(flags[0].slice(12)));
+    }
+    if (verb === 'diff') {
+      return args.length === 3 && args[0] === '--no-ext-diff' && args[1] === '--no-textconv'
+        && ['--stat', '--shortstat', '--name-only'].includes(args[2]);
+    }
+    return false;
+  }
+  // Read a single literal file, without pipes, grouping, expansions or options
+  // hidden in its path. Richer searches belong in Read/Grep/Glob.
+  const powershell = command.match(/^Get-Content\s+-LiteralPath\s+(?:'([^']+)'|"([^"]+)"|([A-Za-z0-9_./:\\-]+))\s+-TotalCount\s+([1-9]\d{0,2})$/i);
+  if (powershell) return bounded(powershell[4]);
+  const head = command.match(/^head\s+-n\s+([1-9]\d{0,2})\s+(?:--\s+)?([A-Za-z0-9_./][A-Za-z0-9_./:\\-]*)$/);
+  return Boolean(head && bounded(head[1]));
 }
 
 /**
