@@ -40,6 +40,18 @@ const STATE_DIR = path.join(os.tmpdir(), 'forge-observer');
 // this only fires on genuine inactivity.
 const TTL_MS = 4 * 60 * 60 * 1000;       // 4 hours idle
 const CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — auto-clean stale files
+// Hooks are separate processes and PostToolUse hooks can run concurrently.
+// A directory is an atomic cross-process mutex on Windows and POSIX. Keep the
+// wait bounded: hooks must fail open rather than stall a host indefinitely.
+const LOCK_RETRY_MS = 10;
+const LOCK_MAX_WAIT_MS = 750;
+const STALE_LOCK_MS = 5 * 1000;
+const PARSE_RETRIES = 4;
+
+function waitBriefly(ms) {
+  // Atomics.wait avoids a subprocess and works in the Node main thread.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 // -- Helpers -----------------------------------------------------------------
 
@@ -167,6 +179,10 @@ function freshState(sessionId) {
     pending_checkpoint: false,
     pending_checkpoint_step: null,    // Skill id pinned for input
     pending_checkpoint_at: null,      // ISO timestamp the pin was set
+    // Optional wire metadata parsed from a CHECKPOINT response. Older servers
+    // do not publish it; callers must retain the conservative fallback.
+    pending_checkpoint_question_id: null,
+    pending_checkpoint_response_field: null,
     // Per-step tool-permission allowlist (V2 enforcement).
     //   - current_step_tools: array of category strings the orchestrator
     //     published in the latest **Tool Permissions** line, or null when
@@ -243,9 +259,91 @@ function cleanupStale() {
 function forSession(sessionId) {
   const fp = statePath(sessionId);
 
+  function withLock(action) {
+    ensureDir();
+    const lockPath = `${fp}.lock`;
+    const deadline = Date.now() + LOCK_MAX_WAIT_MS;
+    while (true) {
+      try {
+        fs.mkdirSync(lockPath);
+        break;
+      } catch (error) {
+        if (error && error.code !== 'EEXIST') throw error;
+        // A crashed hook can leave a lock behind. Recover only a clearly stale
+        // lock, and only after checking its mtime; never delete an active lock.
+        try {
+          if (Date.now() - fs.statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
+            fs.rmSync(lockPath, { recursive: true, force: true });
+            continue;
+          }
+        } catch {
+          // Another process may have released it between exists/stat calls.
+        }
+        if (Date.now() >= deadline) {
+          throw new Error('Timed out acquiring Forge session-state lock');
+        }
+        waitBriefly(LOCK_RETRY_MS);
+      }
+    }
+    try {
+      return action();
+    } finally {
+      try { fs.rmdirSync(lockPath); } catch { /* best effort lock cleanup */ }
+    }
+  }
+
   function writeRaw(state) {
     ensureDir();
-    fs.writeFileSync(fp, JSON.stringify(state, null, 2), 'utf8');
+    const temp = `${fp}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temp, JSON.stringify(state, null, 2), 'utf8');
+      // rename is atomic on the same volume. Windows can transiently reject a
+      // replacement while another hook has just closed the old file.
+      let lastError;
+      for (let i = 0; i < PARSE_RETRIES; i += 1) {
+        try {
+          fs.renameSync(temp, fp);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (!error || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) || i === PARSE_RETRIES - 1) throw error;
+          waitBriefly(LOCK_RETRY_MS);
+        }
+      }
+      throw lastError;
+    } finally {
+      try { if (fs.existsSync(temp)) fs.unlinkSync(temp); } catch { /* best effort */ }
+    }
+  }
+
+  function parseExisting(strict) {
+    if (!fs.existsSync(fp)) return null;
+    let lastError;
+    for (let i = 0; i < PARSE_RETRIES; i += 1) {
+      try {
+        return JSON.parse(fs.readFileSync(fp, 'utf8'));
+      } catch (error) {
+        lastError = error;
+        waitBriefly(LOCK_RETRY_MS);
+      }
+    }
+    if (strict) throw new Error(`Forge session state is unreadable; refusing to overwrite it: ${lastError?.message || 'parse failure'}`);
+    return null;
+  }
+
+  // The write path reads under the lock, bypassing read(), so it must apply the
+  // same idle expiry. Otherwise the first hook write after the idle window
+  // merges into the dead session and refreshes its mtime, reviving the
+  // active_workflow, CHECKPOINT pin and per-step allowlist that read() had
+  // already reported gone. An expired file is replaced even when unreadable:
+  // nothing is still writing a file that has been idle that long.
+  function readForWrite() {
+    try {
+      if (Date.now() - fs.statSync(fp).mtimeMs > TTL_MS) return freshState(sessionId);
+    } catch {
+      // No file yet — parseExisting reports that as null.
+    }
+    return parseExisting(true) || freshState(sessionId);
   }
 
   /**
@@ -270,8 +368,8 @@ function forSession(sessionId) {
     if (!fs.existsSync(fp)) return freshState(sessionId);
 
     try {
-      const raw = fs.readFileSync(fp, 'utf8');
-      const state = JSON.parse(raw);
+      const state = parseExisting(false);
+      if (!state) return freshState(sessionId);
 
       // Staleness is measured from the last WRITE (file mtime), not from
       // session_start — a sliding idle window rather than an absolute cap.
@@ -312,10 +410,15 @@ function forSession(sessionId) {
    * @param {Object} updates — fields to merge (shallow)
    */
   function write(updates) {
-    const state = read();
-    Object.assign(state, updates);
-    writeRaw(state);
-    return state;
+    return withLock(() => {
+      // Read after acquiring the lock. This is the read-modify-write boundary:
+      // independent hook updates (counters, arrays and unrelated fields) are
+      // merged with the latest durable state instead of clobbering each other.
+      const state = readForWrite();
+      Object.assign(state, updates);
+      writeRaw(state);
+      return state;
+    });
   }
 
   /**
@@ -323,10 +426,12 @@ function forSession(sessionId) {
    * @param {string} field — the field name to increment
    */
   function increment(field) {
-    const state = read();
-    state[field] = (state[field] || 0) + 1;
-    writeRaw(state);
-    return state;
+    return withLock(() => {
+      const state = readForWrite();
+      state[field] = (state[field] || 0) + 1;
+      writeRaw(state);
+      return state;
+    });
   }
 
   return { read, write, increment, stateFilePath: fp };
