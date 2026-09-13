@@ -4,6 +4,16 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.2] - 2026-09-12
+
+### Fixed
+- **Forge's hooks now work on Windows.** Cursor on Windows prefixes hook input
+  with a byte-order mark, which the prompt, tool-tracking and stop hooks could
+  not read, so they silently did nothing: a running workflow, a pending
+  question and each step's allowed tools were never recorded, and the checks
+  that depend on them had nothing to enforce. All of Forge's hooks now read
+  that input, completing the Windows fix begun in 1.22.1.
+
 ## [1.22.1] - 2026-09-12
 
 ### Fixed
