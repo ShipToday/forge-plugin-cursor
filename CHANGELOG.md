@@ -4,6 +4,28 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.1] - 2026-09-12
+
+### Fixed
+- **Forge's own tools stay available while a question is pending.** Cursor
+  names MCP tools `MCP:<tool>`, which the checkpoint guard did not recognise,
+  so recording the answer (`forge__update_state`) and leaving the workflow
+  were blocked at the very checkpoint they resolve. MCP tools are now matched
+  by their tool name, and read-only connector lookups, Cursor's question tool,
+  directory listing and lint reads stay available too.
+- **Step permissions apply to Cursor's tools.** Terminal commands (`Shell`)
+  and typing into a running terminal count as shell actions and file deletion
+  counts as an edit, so a step that does not allow them now blocks them. The
+  short list of read-only inspection commands allowed at a checkpoint works
+  with Cursor's terminal tool.
+- **Blocks use Cursor's hook reply format.** A denial is returned as Cursor's
+  `permission` / `user_message` reply, which is the text the agent is shown,
+  and the guidance names Cursor's question tool.
+- **The guard reads hook input on Windows.** Cursor on Windows prefixes hook
+  input with a byte-order mark, which made the guard skip every check. The
+  other Forge hooks do not read that input yet, so on Windows the workflow
+  state these checks rely on is not recorded until they do.
+
 ## [1.22.0] - 2026-09-12
 
 ### Fixed

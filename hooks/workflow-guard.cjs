@@ -53,10 +53,25 @@
  * would never have anything to deliver — and `updatedInput`-style input
  * rewrites have no verified support in Cursor's hook protocol. This build
  * therefore never emits input rewrites (SUPPORTS_UPDATED_INPUT below):
- * token capture stays honest-null, `duration_ms` keeps the server's
- * wall-clock fallback, and the checkpoint / per-step permission enforcement
- * below is identical to the Claude Code source — keep it that way on every
- * plugin sync (/shiptoday-plugin).
+ * token capture stays honest-null, and `duration_ms` keeps the server's
+ * wall-clock fallback.
+ *
+ * Cursor's preToolUse contract differs from Claude Code's, and this build
+ * follows Cursor's:
+ *   - The shell tool is `Shell` (`tool_input.command`), a file deletion is
+ *     `Delete`, and an MCP tool arrives as `MCP:<tool name>` with no server
+ *     segment.
+ *   - A denial is the flat `{permission: "deny", user_message}` reply. The
+ *     agent is shown `user_message`; `agent_message` on its own is not shown.
+ *     Cursor also translates the nested `hookSpecificOutput` form, but only
+ *     when no flat field is present, so deny() sends both with one reason.
+ *     A top-level `decision` is ignored.
+ *   - On Windows the payload arrives through a PowerShell pipeline that
+ *     prefixes a UTF-8 byte-order mark, and exit codes do not survive the
+ *     wrapper. The event is parsed after stripping the mark, and denials are
+ *     never expressed through the exit code.
+ * Keep the checkpoint / per-step enforcement otherwise identical to the
+ * Claude Code source on every plugin sync (/shiptoday-plugin).
  *
  * @see plugin/hooks/token-usage.cjs for the transcript-parsing capture adapters
  * @see plugin/hooks/workflow-tracker.cjs for the state writes this hook reads
@@ -95,6 +110,7 @@ const ALWAYS_ALLOWED_BARE_NAMES = new Set([
   'forge__send_feedback',
   // Question relay — the only way for the model to talk to the user mid-step
   'AskUserQuestion',
+  'AskQuestion', // Cursor's question tool
   'request_user_input',
   'request_user_input_async',
   'functions.request_user_input',
@@ -103,6 +119,7 @@ const ALWAYS_ALLOWED_BARE_NAMES = new Set([
   'Read',
   'Grep',
   'Glob',
+  'List', 'ReadLints', // Cursor's read-only directory listing and lint read
   'TodoWrite',
   'mark_chapter',
   // Deferred Forge discovery and local recovery/coordination. This is a
@@ -128,8 +145,8 @@ const READONLY_PREFIXES = ['list_', 'get_', 'search_', 'query_', 'fetch_', 'read
 // without a registry update.
 
 const CATEGORY_PATTERNS = {
-  read_code:    [/^Read$/, /^Grep$/, /^Glob$/],
-  ask_user:     [/^AskUserQuestion$/, /^(?:functions\.)?request_user_input(?:_async)?$/],
+  read_code:    [/^Read$/, /^Grep$/, /^Glob$/, /^List$/, /^ReadLints$/],
+  ask_user:     [/^AskUserQuestion$/, /^AskQuestion$/, /^(?:functions\.)?request_user_input(?:_async)?$/],
   web:          [/^WebFetch$/, /^WebSearch$/],
 
   tracker_read: [
@@ -180,9 +197,14 @@ const CATEGORY_PATTERNS = {
     /^get_account_info$/,
   ],
 
-  code_edit:    [/^Edit$/, /^Write$/, /^NotebookEdit$/],
-  shell:        [/^Bash$/, /^PowerShell$/, /^Monitor$/],
+  code_edit:    [/^Edit$/, /^Write$/, /^NotebookEdit$/, /^Delete$/],
+  // Cursor: `Shell` runs commands and `WriteShellStdin` types into a running one.
+  shell:        [/^Bash$/, /^PowerShell$/, /^Monitor$/, /^Shell$/, /^WriteShellStdin$/],
 };
+
+// Command tools whose exact read-only invocations may cross a checkpoint.
+// `Monitor` and `WriteShellStdin` are deliberately absent.
+const INSPECTION_SHELL_TOOLS = ['Bash', 'PowerShell', 'Shell'];
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -202,7 +224,8 @@ function bareName(toolName) {
   // would be DENIED mid-checkpoint). The first `__` after `mcp__` is the
   // server/tool delimiter; the tool itself may contain `__`
   // (e.g. `forge__update_state`), which the greedy trailing group preserves.
-  const m = toolName.match(/^mcp__.+?__(.+)$/);
+  // Cursor names MCP tools `MCP:<tool name>` (`MCP:forge__update_state`).
+  const m = toolName.match(/^mcp__.+?__(.+)$/) || toolName.match(/^MCP:(.+)$/);
   return m ? m[1] : toolName;
 }
 
@@ -215,7 +238,7 @@ function isUniversallyAllowed(bare) {
 }
 
 function isBoundedReadShell(event, bare) {
-  if (!['Bash', 'PowerShell'].includes(bare)) return false;
+  if (!INSPECTION_SHELL_TOOLS.includes(bare)) return false;
   let input = event.tool_input || {};
   try { if (typeof input === 'string') input = JSON.parse(input); } catch { return false; }
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
@@ -258,7 +281,7 @@ function isBoundedReadShell(event, bare) {
 // argument order and a literal github.com URL make review scope observable
 // without authorizing a general `gh` command or another host.
 function isPrRevisionRead(event, bare) {
-  if (!['Bash', 'PowerShell'].includes(bare)) return false;
+  if (!INSPECTION_SHELL_TOOLS.includes(bare)) return false;
   let input = event.tool_input || {};
   try { if (typeof input === 'string') input = JSON.parse(input); } catch { return false; }
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
@@ -295,7 +318,7 @@ function buildCheckpointDenyReason(state, toolName) {
     `Tool "${toolName}" cannot proceed until the user has answered.`,
     ``,
     'You have three options:',
-    '  1. Call AskUserQuestion to relay the pending question to the user.',
+    '  1. Relay the pending question to the user with AskQuestion, or ask it in your reply.',
     `  2. Call forge__update_state with the user's answer (set state_updates.${responseField}).`,
     '  3. Call forge__abandon_workflow with a meaningful reason ONLY if the workflow itself no longer applies (wrong workflow, user redirected).',
     '     Never abandon to skip the remaining steps: a post-step confirmation gate already offers the user "Stop here" for that — relay it.',
@@ -305,10 +328,14 @@ function buildCheckpointDenyReason(state, toolName) {
   return lines.join('\n');
 }
 
+// Cursor applies the flat fields and shows the agent `user_message`;
+// `agent_message` travels with it for hosts that forward it separately. The
+// nested form carries the same reason for Cursor's Claude-compatible parser.
 function deny(reason) {
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: {
-    hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason,
-  } }));
+  process.stdout.write(JSON.stringify({
+    permission: 'deny', user_message: reason, agent_message: reason,
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+  }));
 }
 
 function buildStepPermissionDenyReason(state, toolName, category) {
@@ -320,7 +347,7 @@ function buildStepPermissionDenyReason(state, toolName, category) {
     ``,
     'Likely you are trying to do work that belongs to a later step. Options:',
     '  1. Continue the current step and call forge__update_state to advance — the next step may allow this tool.',
-    '  2. Call AskUserQuestion if the user needs to make a decision before this step can complete.',
+    '  2. Ask the user with AskQuestion, or in your reply, if they need to make a decision before this step can complete.',
     '  3. Call forge__abandon_workflow with a meaningful reason ONLY if the workflow itself no longer applies (wrong workflow, user redirected).',
     '     Never abandon to skip the remaining steps: a post-step confirmation gate already offers the user "Stop here" for that — relay it.',
     ``,
@@ -338,7 +365,9 @@ async function main() {
     input += chunk;
   }
   try {
-    event = JSON.parse(input);
+    // Cursor on Windows prefixes the payload with a UTF-8 byte-order mark;
+    // trim() removes it (U+FEFF is whitespace to JavaScript) with the CRLF.
+    event = JSON.parse(input.trim());
   } catch {
     return; // Malformed input — fail open
   }
