@@ -4,6 +4,30 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-09-12
+
+### Fixed
+- **Simultaneous hook updates no longer overwrite each other.** Session-state
+  writes are serialized and replaced atomically, so tool events that land at
+  the same moment keep each other's workflow, checkpoint and counter updates,
+  and an unreadable state file is left alone instead of being replaced with a
+  blank session.
+- **Checkpoint guidance names the answer field Forge expects.** When a tool is
+  held back at a checkpoint, the guidance points at the response field Forge
+  published for that question (defaulting to `gate_answer`) instead of always
+  suggesting `user_answer`.
+
+### Changed
+- **Clearer fallback when no native question tool is available.** Bounded
+  choices are shown as a numbered list to answer by number (comma-separated
+  for multi-select). A submission acknowledgment is not treated as an answer,
+  and an invalid or out-of-range number never becomes a choice or an approval.
+- **Checkpoint enforcement is aligned with the other Forge plugins.** The guard
+  emits the nested PreToolUse denial format, keeps tool discovery, waiting and
+  task-coordination tools available while a decision is pending, and treats
+  `Monitor` as a shell tool. Enforcement still depends on the hook contract
+  Cursor applies to plugin hooks.
+
 ## [1.21.0] - 2026-09-11
 
 ### Fixed

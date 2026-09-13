@@ -41,7 +41,8 @@
  * token columns on ad_hoc/checkpoint rows).
  *
  * Hook contract: PreToolUse hooks may emit a JSON payload on stdout —
- * `{decision: "deny", reason: "..."}` to refuse the tool, or
+ * `{hookSpecificOutput: {permissionDecision: "deny", permissionDecisionReason: "..."}}`
+ * to refuse the tool, or
  * `{hookSpecificOutput: {permissionDecision: "allow", updatedInput: {…}}}`
  * to rewrite the tool input (Claude Code >= 2.0.10). Anything else (silence,
  * exit code 0) allows the call to proceed unchanged.
@@ -104,6 +105,10 @@ const ALWAYS_ALLOWED_BARE_NAMES = new Set([
   'Glob',
   'TodoWrite',
   'mark_chapter',
+  // Deferred Forge discovery and local recovery/coordination. This is a
+  // narrow host-tool list, not permission for connector writes.
+  'ToolSearch', 'Skill', 'ScheduleWakeup', 'TaskOutput', 'ListAgents',
+  'Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
   // Internal session tooling
   'spawn_task',
 ]);
@@ -176,7 +181,7 @@ const CATEGORY_PATTERNS = {
   ],
 
   code_edit:    [/^Edit$/, /^Write$/, /^NotebookEdit$/],
-  shell:        [/^Bash$/, /^PowerShell$/],
+  shell:        [/^Bash$/, /^PowerShell$/, /^Monitor$/],
 };
 
 // -- Helpers ----------------------------------------------------------------
@@ -209,6 +214,59 @@ function isUniversallyAllowed(bare) {
   return false;
 }
 
+function isBoundedReadShell(event, bare) {
+  if (!['Bash', 'PowerShell'].includes(bare)) return false;
+  let input = event.tool_input || {};
+  try { if (typeof input === 'string') input = JSON.parse(input); } catch { return false; }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const command = typeof input.command === 'string' ? input.command.trim() : '';
+  // Recognize whole command shapes, not a safe-looking suffix. In particular,
+  // never interpret shell syntax, output options, preprocessors, or Git config.
+  if (!command || command.length > 800 || /[;&|`$<>(){}\[\]#%\r\n]/.test(command)) return false;
+  if (/^(?:pwd|Get-Location)$/i.test(command)) return true;
+  const bounded = value => /^[1-9]\d{0,2}$/.test(value) && Number(value) <= 200;
+  const args = command.split(/\s+/);
+  if (args.shift()?.toLowerCase() === 'git') {
+    if (args[0] === '--no-pager') args.shift();
+    const verb = args.shift();
+    if (verb === 'status') {
+      const flags = new Set(['--short', '--branch', '--porcelain', '--porcelain=v1', '--porcelain=v2']);
+      return args.length <= 2 && args.every(flag => flags.has(flag)) && new Set(args).size === args.length;
+    }
+    if (verb === 'log') {
+      const flags = args.filter(flag => flag !== '--oneline');
+      if (args.length - flags.length > 1) return false;
+      return (flags.length === 2 && ['-n', '--max-count'].includes(flags[0]) && bounded(flags[1]))
+        || (flags.length === 1 && /^--max-count=/.test(flags[0]) && bounded(flags[0].slice(12)));
+    }
+    if (verb === 'diff') {
+      return args.length === 3 && args[0] === '--no-ext-diff' && args[1] === '--no-textconv'
+        && ['--stat', '--shortstat', '--name-only'].includes(args[2]);
+    }
+    return false;
+  }
+  // Read a single literal file, without pipes, grouping, expansions or options
+  // hidden in its path. Richer searches belong in Read/Grep/Glob.
+  const powershell = command.match(/^Get-Content\s+-LiteralPath\s+(?:'([^']+)'|"([^"]+)"|([A-Za-z0-9_./:\\-]+))\s+-TotalCount\s+([1-9]\d{0,2})$/i);
+  if (powershell) return bounded(powershell[4]);
+  const head = command.match(/^head\s+-n\s+([1-9]\d{0,2})\s+(?:--\s+)?([A-Za-z0-9_./][A-Za-z0-9_./:\\-]*)$/);
+  return Boolean(head && bounded(head[1]));
+}
+
+// The revalidation protocol needs this one remote, read-only lookup while a
+// checkpoint is pinned. Keep it separate from local bounded inspection: exact
+// argument order and a literal github.com URL make review scope observable
+// without authorizing a general `gh` command or another host.
+function isPrRevisionRead(event, bare) {
+  if (!['Bash', 'PowerShell'].includes(bare)) return false;
+  let input = event.tool_input || {};
+  try { if (typeof input === 'string') input = JSON.parse(input); } catch { return false; }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const command = typeof input.command === 'string' ? input.command : '';
+  const match = /^gh pr view ([1-9]\d*) --repo https:\/\/github\.com\/(?!(?:\.|\.\.)\/)[A-Za-z0-9_.-]{1,200}\/(?!(?:\.|\.\.)(?: |$))[A-Za-z0-9_.-]{1,200} --json number,url,state,headRefOid$/.exec(command);
+  return Boolean(match && Number.isSafeInteger(Number(match[1])));
+}
+
 /**
  * Does the bare tool name match any pattern in the allowed categories?
  * Returns the matching category or null. If null, the tool either belongs
@@ -231,19 +289,26 @@ function isAllowedByStepPermissions(bare, allowedCategories) {
 }
 
 function buildCheckpointDenyReason(state, toolName) {
+  const responseField = state.pending_checkpoint_response_field || 'gate_answer';
   const lines = [
     `Forge workflow is at a CHECKPOINT awaiting user input (skill="${state.pending_checkpoint_step || 'unknown'}").`,
     `Tool "${toolName}" cannot proceed until the user has answered.`,
     ``,
     'You have three options:',
     '  1. Call AskUserQuestion to relay the pending question to the user.',
-    '  2. Call forge__update_state with the user\'s answer (set state_updates.user_answer).',
+    `  2. Call forge__update_state with the user's answer (set state_updates.${responseField}).`,
     '  3. Call forge__abandon_workflow with a meaningful reason ONLY if the workflow itself no longer applies (wrong workflow, user redirected).',
     '     Never abandon to skip the remaining steps: a post-step confirmation gate already offers the user "Stop here" for that — relay it.',
     ``,
     'Do NOT silently bypass the workflow. The audit trail is how the team learns when workflows misroute.',
   ];
   return lines.join('\n');
+}
+
+function deny(reason) {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: {
+    hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason,
+  } }));
 }
 
 function buildStepPermissionDenyReason(state, toolName, category) {
@@ -470,14 +535,11 @@ async function main() {
   if (!state.active_workflow) return; // No active workflow — allow.
 
   // Universals always pass — Forge orchestration, AskUserQuestion, read-only.
-  if (isUniversallyAllowed(bare)) return;
+  if (isUniversallyAllowed(bare) || isBoundedReadShell(event, bare) || isPrRevisionRead(event, bare)) return;
 
   // Layer 1: CHECKPOINT enforcement.
   if (state.pending_checkpoint) {
-    process.stdout.write(JSON.stringify({
-      decision: 'deny',
-      reason: buildCheckpointDenyReason(state, bare),
-    }));
+    deny(buildCheckpointDenyReason(state, bare));
     return;
   }
 
@@ -485,10 +547,7 @@ async function main() {
   if (Array.isArray(state.current_step_tools) && state.current_step_tools.length > 0) {
     const category = categoryFor(bare);
     if (category && !state.current_step_tools.includes(category)) {
-      process.stdout.write(JSON.stringify({
-        decision: 'deny',
-        reason: buildStepPermissionDenyReason(state, bare, category),
-      }));
+      deny(buildStepPermissionDenyReason(state, bare, category));
       return;
     }
   }
