@@ -4,6 +4,62 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.2] - 2026-09-12
+
+### Fixed
+- **Forge's hooks now work on Windows.** Cursor on Windows prefixes hook input
+  with a byte-order mark, which the prompt, tool-tracking and stop hooks could
+  not read, so they silently did nothing: a running workflow, a pending
+  question and each step's allowed tools were never recorded, and the checks
+  that depend on them had nothing to enforce. All of Forge's hooks now read
+  that input, completing the Windows fix begun in 1.22.1.
+
+## [1.22.1] - 2026-09-12
+
+### Fixed
+- **Forge's own tools stay available while a question is pending.** Cursor
+  names MCP tools `MCP:<tool>`, which the checkpoint guard did not recognise,
+  so recording the answer (`forge__update_state`) and leaving the workflow
+  were blocked at the very checkpoint they resolve. MCP tools are now matched
+  by their tool name, and read-only connector lookups, Cursor's question tool,
+  directory listing and lint reads stay available too.
+- **Step permissions apply to Cursor's tools.** Terminal commands (`Shell`)
+  and typing into a running terminal count as shell actions and file deletion
+  counts as an edit, so a step that does not allow them now blocks them. The
+  short list of read-only inspection commands allowed at a checkpoint works
+  with Cursor's terminal tool.
+- **Blocks use Cursor's hook reply format.** A denial is returned as Cursor's
+  `permission` / `user_message` reply, which is the text the agent is shown,
+  and the guidance names Cursor's question tool.
+- **The guard reads hook input on Windows.** Cursor on Windows prefixes hook
+  input with a byte-order mark, which made the guard skip every check. The
+  other Forge hooks do not read that input yet, so on Windows the workflow
+  state these checks rely on is not recorded until they do.
+
+## [1.22.0] - 2026-09-12
+
+### Fixed
+- **Simultaneous hook updates no longer overwrite each other.** Session-state
+  writes are serialized and replaced atomically, so tool events that land at
+  the same moment keep each other's workflow, checkpoint and counter updates,
+  and an unreadable state file is left alone instead of being replaced with a
+  blank session.
+- **Checkpoint guidance names the answer field Forge expects.** When a tool is
+  held back at a checkpoint, the guidance points at the response field Forge
+  published for that question (defaulting to `gate_answer`) instead of always
+  suggesting `user_answer`.
+
+### Changed
+- **Clearer fallback when no native question tool is available.** Bounded
+  choices are shown as a numbered list to answer by number (comma-separated
+  for multi-select). A submission acknowledgment is not treated as an answer,
+  and an invalid or out-of-range number never becomes a choice or an approval.
+- **Checkpoint enforcement is aligned with the other Forge plugins.** The guard
+  emits the nested PreToolUse denial format, keeps tool discovery, waiting and
+  task-coordination tools available while a decision is pending, and treats
+  `Monitor` as a shell tool. Enforcement still depends on the hook contract
+  Cursor applies to plugin hooks.
+
 ## [1.21.0] - 2026-09-11
 
 ### Fixed
