@@ -253,6 +253,20 @@ function isBoundedReadShell(event, bare) {
   return Boolean(head && bounded(head[1]));
 }
 
+// The revalidation protocol needs this one remote, read-only lookup while a
+// checkpoint is pinned. Keep it separate from local bounded inspection: exact
+// argument order and a literal github.com URL make review scope observable
+// without authorizing a general `gh` command or another host.
+function isPrRevisionRead(event, bare) {
+  if (!['Bash', 'PowerShell'].includes(bare)) return false;
+  let input = event.tool_input || {};
+  try { if (typeof input === 'string') input = JSON.parse(input); } catch { return false; }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const command = typeof input.command === 'string' ? input.command : '';
+  const match = /^gh pr view ([1-9]\d*) --repo https:\/\/github\.com\/(?!(?:\.|\.\.)\/)[A-Za-z0-9_.-]{1,200}\/(?!(?:\.|\.\.)(?: |$))[A-Za-z0-9_.-]{1,200} --json number,url,state,headRefOid$/.exec(command);
+  return Boolean(match && Number.isSafeInteger(Number(match[1])));
+}
+
 /**
  * Does the bare tool name match any pattern in the allowed categories?
  * Returns the matching category or null. If null, the tool either belongs
@@ -521,7 +535,7 @@ async function main() {
   if (!state.active_workflow) return; // No active workflow — allow.
 
   // Universals always pass — Forge orchestration, AskUserQuestion, read-only.
-  if (isUniversallyAllowed(bare) || isBoundedReadShell(event, bare)) return;
+  if (isUniversallyAllowed(bare) || isBoundedReadShell(event, bare) || isPrRevisionRead(event, bare)) return;
 
   // Layer 1: CHECKPOINT enforcement.
   if (state.pending_checkpoint) {
