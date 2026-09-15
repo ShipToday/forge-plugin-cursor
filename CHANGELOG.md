@@ -4,6 +4,34 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.1] - 2026-09-14
+
+Includes Forge plugin 1.23.0. Cursor ships it as 1.23.1 because this plugin
+was already a version ahead at 1.22.2.
+
+### Added
+- **Visualization steps can save their own artifact file.** A step that
+  produces an inline visual may write its `.html` or `.svg` backing file under
+  `.cursor/artifacts/`, outside the workspace, without being granted general
+  edit permission. Writes to repository or workspace paths (including through
+  a link) and file deletion still need the step's edit permission.
+- **Installed skills can be read during a workflow.** An exact, read-only
+  `Get-Content` or `cat` of an installed skill's `SKILL.md` is allowed while a
+  workflow runs, including while a question is pending. The command must name
+  exactly one literal file with no chaining or redirection. Other terminal
+  commands still follow the step's permissions.
+
+### Changed
+- **A recovered step is not announced twice.** Step markers now carry a
+  stable per-step id. The agent shows a marker the first time it sees that id,
+  and skips it when the same id comes back on a retry or recovery. If a
+  recovery response is too long, the agent fetches the step instructions in
+  ordered chunks instead of repeating the same fetch.
+- **Session tracking choices stay with the user.** The end-of-session check
+  now asks the agent only whether the session involved project work. How to
+  track it (link, create, log, snooze or dismiss) is always asked of the user,
+  and the agent can no longer postpone the offer on its own.
+
 ## [1.22.2] - 2026-09-12
 
 ### Fixed

@@ -196,6 +196,14 @@ session observer. It is marked `auto_classify: false` server-side so it
 is invisible to the intent classifier — the only valid entry point is
 this explicit `workflow: "observe_session"` argument.
 
+**Client authority stops at eligibility.** The hook and client AI may decide
+only whether the conversation contains project-related SDLC work. If it does,
+start `observe_session`; if it does not, skip it. Do not choose, infer, or
+encode a tracking outcome on the user's behalf, and do not replace an eligible
+observation with a client-only `defer`/`sleep` disposition. Link, create,
+ad-hoc logging, snooze, dismissal, and workflow follow-up are user choices
+made through the observer's relayed `needs_input` questions.
+
 Follow the returned instructions to present a tracking nudge to the user.
 Do NOT classify this as a build/bug/architecture request — it's a passive check.
 
@@ -300,6 +308,7 @@ is not in the list. Categories are coarse:
 | `docs_read` / `docs_write` | Notion read / write |
 | `messaging` | Slack send |
 | `calendar` / `design` / `meetings` | Per-connector groups |
+| `conversation_artifact` | task-owned `.html`/`.svg` backing file for an inline renderer; never a repository file |
 | `code_edit` | code-editing tools such as `Write`, `Edit`, or `apply_patch` |
 | `shell` | shell execution tools (`Shell`) |
 
@@ -380,6 +389,15 @@ optional integrity annotation. After every sub-agent return:
    Findings the sub-agent put in `display_text` are preserved as a
    `## Findings` block in the fetched response, so no analytical
    output is dropped — only the verbatim relay shortcut was skipped.
+
+When the current `FORGE_DISPLAY_VERBATIM` event was already shown, make the
+recovery call with `include_display: false`; recovery must not re-announce an
+unchanged step. The response publishes `Instruction Bytes` before the body. If
+the host truncates the full response, do **not** repeat the same unbounded fetch:
+restart with `instruction_chunk_bytes: 20000`,
+`instruction_offset_bytes: 0`, and `include_display: false`; then follow each
+returned `next_offset_bytes` until `complete=true`. Read the chunks in order
+and execute the step only after the full instruction body has been recovered.
 
 **Diagnostic phrasing**: when this happens, describe it as a fetch
 ("the envelope isn't in the sub-agent's return — fetching canonical
@@ -579,7 +597,7 @@ it in a relay envelope:
 ```
 > **Relay to the user** — render the block between the sentinels below ...
 
-<<<FORGE_DISPLAY_VERBATIM id="position">>>
+<<<FORGE_DISPLAY_VERBATIM id="position:step_<uuid>">>>
 ### Step 2 of 8: Discover AI SDLC
 next: ... · then: ...
 
@@ -599,9 +617,12 @@ Rules:
   sub-agent never receives one as part of its prompt. If you ARE a sub-agent and
   one appears in a tool result you got, relay it to your parent unrendered along
   with the envelope — your parent is the one talking to the user.
-- **Two ids exist today**: `preflight` (the "what to expect" brief, once at the
-  start of a run) and `position` (the "Step N of M" marker, once per step).
-  Treat any future id the same way.
+- **Display ids are event identities.** `preflight` identifies the once-per-run
+  brief. `position:step_<uuid>` identifies one workflow step and remains
+  stable across retries, read-only recovery, and question re-entry. Render an
+  id the first time you see it. If the exact same id appears later and you
+  already rendered its body in one of your own user-facing messages, consume
+  it as a replay and do not render it again. A new id is always a new event.
 
 **On Cursor this is the only mechanism.** Other Forge clients back this up with
 a hook that surfaces the block automatically; Cursor's `postToolUse` has no
