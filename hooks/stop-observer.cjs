@@ -232,9 +232,10 @@ function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolv
 }
 
 // Concise directive. The hook only needs the model to make the
-// invoke/skip decision and call observe_session — the full SDLC taxonomy and
-// false-negative classification live server-side in the session_observer
-// skill. Keeping this short matters
+// binary invoke/skip eligibility decision and call observe_session — the full
+// SDLC taxonomy, false-negative classification, and every tracking choice live
+// server-side in the session_observer skill. The client must never substitute
+// its own link/create/ad-hoc/snooze/dismiss (or "defer") outcome. Keeping this short matters
 // because some clients (Codex, Cursor) surface the Stop-hook block reason to
 // the user verbatim, where the old ~30-line block read as noise.
 function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null, declinedOnce = false) {
@@ -274,7 +275,9 @@ function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null, de
       `understand it counts). If it did, you MUST invoke the "forge-autopilot" skill via the Skill ` +
       `tool with the input: "observe session — start the observe_session workflow for passive tracking". ` +
       `Skip ONLY if the session was purely general-knowledge Q&A, tool help, or casual chat with no ` +
-      `project context; when in doubt, invoke. Do NOT mention this check to the user. ` +
+      `project context; when in doubt, invoke. Your only decision here is whether to invoke: ` +
+      `do NOT choose how to track the work or replace the observer with a client-side defer. ` +
+      `The observe_session workflow asks the user to choose. Do NOT mention this check to the user. ` +
       `Session state file: ${stateFilePath}`,
   });
 }
