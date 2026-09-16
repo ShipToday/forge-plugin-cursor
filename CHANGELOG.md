@@ -4,6 +4,17 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.24.0] - 2026-09-16
+
+Includes Forge plugin 1.24.0. Cursor's version matches Forge's again.
+
+### Changed
+- **The routing skill includes Forge's Codex question guidance.** Codex
+  should not use its async question picker for Forge decisions, because that
+  picker can close before the user answers; it asks with a blocking question
+  or a numbered reply instead. The guidance applies only to Codex. Questions
+  in Cursor work as before.
+
 ## [1.23.1] - 2026-09-14
 
 Includes Forge plugin 1.23.0. Cursor ships it as 1.23.1 because this plugin
