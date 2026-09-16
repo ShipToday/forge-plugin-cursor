@@ -427,6 +427,9 @@ async function main() {
   const toolName = event.tool_name || '';
   const toolResponse = event.tool_response || '';
 
+  if (event.forge_wrapped_response && !event.forge_response_passthrough
+    && sessionState.read().state_recovery_required) return;
+
   if (WORKFLOW_RECOVERY_PATTERN.test(toolName.replace(/^MCP:/, ''))) {
     const updates = recoveryUpdates(event);
     if (updates) sessionState.write(updates, { onlyIfRecoveryRequired: true });
