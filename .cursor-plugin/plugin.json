@@ -1,8 +1,8 @@
 {
   "name": "forge",
   "displayName": "Forge by ShipToday",
-  "version": "1.24.0",
-  "description": "Free, AI-powered product development lifecycle automation. Routes feature requests, bug reports, planning, reviews, and work-item follow-ups through structured ShipToday workflows backed by the hosted Forge MCP server.",
+  "version": "2.3.1",
+  "description": "Free, AI-powered product development lifecycle automation. Ask Forge by name and it routes feature requests, bug reports, planning, reviews, and work-item follow-ups through structured ShipToday workflows backed by the hosted Forge MCP server.",
   "author": {
     "name": "ShipToday"
   },
