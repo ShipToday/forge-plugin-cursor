@@ -4,9 +4,9 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.3.0] - 2026-09-26
+## [2.3.1] - 2026-09-26
 
-Includes Forge plugin 2.3.0, and with it the 1.24.1 to 2.2.0 changes, which
+Includes Forge plugin 2.3.1, and with it the 1.24.1 to 2.3.0 changes, which
 Cursor did not ship separately.
 
 ### Changed
@@ -47,8 +47,9 @@ Cursor did not ship separately.
   write plan on your behalf.
 - **Recovery after a lost reply.** When Forge's reply does not arrive in full,
   `forge__get_workflow_state` restores the pending question, the active step
-  and its write lock. Until that re-sync, a step whose reply could not be read
-  holds its writes.
+  and its write lock, or, when the reply that went missing was the run's last,
+  reports that the run has ended and releases it. Until that re-sync, a step
+  whose reply could not be read holds its writes.
 
 ### Fixed
 - **Guidance names the right answer field.** A pending question's answer goes
