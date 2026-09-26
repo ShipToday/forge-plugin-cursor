@@ -4,6 +4,17 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.2] - 2026-09-26
+
+Includes Forge plugin 2.3.2. No behaviour changes.
+
+### Changed
+- **Comments no longer mention ShipToday's internal tracking.** The hook
+  comments no longer name internal ticket keys, server source files, test
+  files, review labels or project phase names; each now describes the
+  behaviour it refers to instead. An old entry below drops a phase label for
+  the same reason.
+
 ## [2.3.1] - 2026-09-26
 
 Includes Forge plugin 2.3.1, and with it the 1.24.1 to 2.3.0 changes, which
@@ -618,7 +629,7 @@ mechanism, which is why the guidance above is stated explicitly in the skill.
   reports Cursor as not measured. The library ships so the other hooks stay
   source-identical and capture lights up automatically if a future Cursor
   release exposes usage.
-- **`active-time.cjs` (new) — idle-excluded engineering time (R1).** Sums
+- **`active-time.cjs` (new) — idle-excluded engineering time.** Sums
   gaps between session-log records, capping idle gaps at 5 minutes, so a
   long pause is not banked as engineering time. With no readable session
   log on Cursor it returns `null` and checkpoints keep the wall-clock
