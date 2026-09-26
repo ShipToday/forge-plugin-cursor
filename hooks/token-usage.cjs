@@ -366,8 +366,8 @@ function extractCodexModel(rec) {
 
 /**
  * Resolve a hook event's session log into parsed records — ONE client-dispatch
- * ladder and ONE file read, shared by token capture AND active-time (review
- * #10: the two modules previously duplicated this ladder verbatim and each
+ * ladder and ONE file read, shared by token capture AND active-time (the
+ * two modules previously duplicated this ladder verbatim and each
  * re-read the same multi-MiB files in the same hook invocation; a drifted
  * copy would classify the same session differently for tokens vs duration,
  * silently reverting durations to wall-clock with no error anywhere).

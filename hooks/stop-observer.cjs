@@ -97,7 +97,7 @@ const FLUSH_INTERVAL = 3;      // turns between checkpoints when skill invocatio
 // silent forced-continuation turns (lower token overhead).
 const TIME_FLOOR_MS = 10 * 60 * 1000; // 10 minutes
 
-// SHI-906: eligibility floor for the FIRST nudge of a session. The observer
+// Eligibility floor for the FIRST nudge of a session. The observer
 // used to become eligible at the end of turn 1, before there was any signal
 // about what the session was even about, so it read as onboarding noise —
 // and because a dismissal was terminal, that one bad impression was also the
@@ -132,8 +132,8 @@ function milestoneReached(state, sessionState) {
   if (head === state.git_head_baseline) return false;
   // ADVANCE the baseline when a milestone is consumed. Leaving it stale
   // would make one commit justify every subsequent check for the rest of
-  // the session — harmless while the nudge fires only once, but SHI-907
-  // lets a soft decline bring the offer back, and a permanently-true
+  // the session — harmless while the nudge fires only once, but a soft
+  // decline can bring the offer back, and a permanently-true
   // milestone would re-fire it on every Stop from then on. That is the
   // over-prompting the error-handling NFR explicitly ranks as worse than
   // a missed offer.
@@ -170,7 +170,7 @@ function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolv
 
   // Piggyback per-session token capture on the SAME checkpoint
   // directive — no new hook, no extra round-trip. The caller resolved the
-  // session log ONCE (main + sub-agent files; review #10) and the same parsed
+  // session log ONCE (main + sub-agent files) and the same parsed
   // records fed the active-time delta above — here they yield the CUMULATIVE
   // raw token components, which the orchestrator writes to a separate
   // `event_type: token_usage` row. The snapshot is cumulative, so the read
@@ -245,7 +245,7 @@ function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolv
 // because some clients (Codex, Cursor) surface the Stop-hook block reason to
 // the user verbatim, where the old ~30-line block read as noise.
 function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null, declinedOnce = false) {
-  // SHI-906 AC3: the nudge's "why now" must match how long the session has
+  // The nudge's "why now" must match how long the session has
   // ACTUALLY been running. The eligibility gate already computed both
   // figures to make its decision, so they are threaded through here rather
   // than re-derived — a separately-computed number could disagree with the
@@ -263,7 +263,7 @@ function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null, de
   const context = elapsed
     ? `This session has been going for ${elapsed}. Say so if you explain why you are checking in now. `
     : '';
-  // SHI-907 AC4: a re-offer after a soft decline must not repeat the first
+  // A re-offer after a soft decline must not repeat the first
   // one verbatim. The user already said no once; asking again in identical
   // words reads as not having listened — and since a soft decline and a
   // snooze now behave alike, this copy is the only difference they can
@@ -305,7 +305,7 @@ function buildSkillContinuationResponse(state) {
   const convo = state.conversation_id || '<conversation_id>';
   // `completed_step` must name the STEP. `current_skill` is the workflow id,
   // so it may label the run in prose but never stand in for the step: posting
-  // it made the model complete a step that does not exist (contract audit).
+  // it made the model complete a step that does not exist.
   // Every start that hands over a step names it now, so the placeholder is
   // left for a preflight-gated start whose step has not been revealed yet.
   const step = state.current_step_skill;
@@ -404,7 +404,7 @@ async function main() {
     const lastCheckpointMs = new Date(lastCheckpoint).getTime();
     const elapsedMs = Date.now() - lastCheckpointMs;
     if (turnsSinceLast < interval && elapsedMs < TIME_FLOOR_MS) return;
-    // R1: bank ACTIVE engineering time (idle excluded) as the checkpoint delta,
+    // Bank ACTIVE engineering time (idle excluded) as the checkpoint delta,
     // not wall-clock. The firing gate ABOVE deliberately still uses wall-clock
     // `elapsedMs` — we want periodic checkpoints on a wall-clock cadence — but
     // the recorded duration is the active time since the last checkpoint, so a
@@ -415,7 +415,7 @@ async function main() {
     // legitimately yields ~0, which sums harmlessly.
     //
     // The session log is resolved ONCE here and shared with the token capture
-    // inside buildCheckpointResponse (review #10 — no double read/parse).
+    // inside buildCheckpointResponse (no double read/parse).
     const resolved = resolveSessionRecords(event);
     const activeMs = activeMsFromResolved(resolved, lastCheckpointMs);
     const durationMs = Number.isFinite(activeMs) ? activeMs : elapsedMs;
@@ -444,9 +444,8 @@ async function main() {
   // Step 3b: per-session observation gate cache.
   //
   // When the MCP-side session_observer skill runs and detects that the
-  // org admin has disabled observation (Clerk publicMetadata.
-  // forgeObservationEnabled = false, surfaced by the orchestrator's
-  // org-settings hydrator), its gated payload tells the parent to
+  // org admin has disabled observation (an org setting the
+  // server reads), its gated payload tells the parent to
   // write forge_observation_enabled: false into this session's state
   // file. On every subsequent Stop in the same Claude Code session,
   // this check short-circuits silently so the hook does NOT re-invoke
@@ -483,7 +482,7 @@ async function main() {
     // observer_fired so the per-session "fire once" counter restarts —
     // the user explicitly asked to be re-prompted by snoozing.
     //
-    // SHI-907: `declined_once` is deliberately NOT cleared here. It is what
+    // `declined_once` is deliberately NOT cleared here. It is what
     // lets the returning offer acknowledge that the user already said no
     // rather than repeating itself verbatim (AC4). A soft decline reaches
     // this same branch — that reuse is the whole point of the design, since
@@ -517,15 +516,14 @@ async function main() {
   if (state.observer_blocked) return;
 
   // Step 7b: Eligibility floor — real signal must exist before the FIRST
-  // nudge of a session (SHI-906 AC1/AC2).
+  // nudge of a session.
   //
   // PLACEMENT IS LOAD-BEARING. This sits AFTER Step 7's observer_blocked
   // check and BEFORE Step 8's write. Moved below that write, the one-shot
   // latch trips on turn 1 and the session is permanently spent WITHOUT ever
   // nudging — strictly worse than the bug this fixes, and silent: the user
-  // simply never sees the offer again and nothing is logged anywhere. The
-  // test `suppressing a turn must NOT consume the session's one-shot
-  // eligibility` in stop-observer-eligibility.test.js exists to catch that.
+  // simply never sees the offer again and nothing is logged anywhere. A
+  // regression test exists to catch that.
   //
   // Fires on turns OR active time OR a git milestone, mirroring the
   // either/or shape of the checkpoint gate in Step 3 above.
@@ -556,14 +554,14 @@ async function main() {
   sessionState.write({ observer_blocked: true, observer_fired: true });
 
   // Step 9: Block Claude's exit and direct it to evaluate the session.
-  // Pass the SAME figures the eligibility gate used (SHI-906 AC3).
+  // Pass the SAME figures the eligibility gate used.
   //
   // `declined_once` has to be threaded here too, not only on Step 4's
   // re-fire path. Step 4 writes `status: null` when it re-offers, so the
   // NEXT Stop no longer matches Step 4 and arrives HERE instead. Omitting
   // the flag meant the second and every later re-offer silently reverted to
   // the original first-offer wording — the exact "asked again as if it had
-  // never asked" behaviour SHI-907 AC4 exists to prevent, and invisible
+  // never asked" behaviour the re-offer wording exists to prevent, and invisible
   // because the copy still reads perfectly well on its own.
   process.stdout.write(buildBlockResponse(
     sessionState.stateFilePath,
