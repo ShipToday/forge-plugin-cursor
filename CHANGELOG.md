@@ -4,6 +4,66 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-09-26
+
+Includes Forge plugin 2.3.0, and with it the 1.24.1 to 2.2.0 changes, which
+Cursor did not ship separately.
+
+### Changed
+- **Forge starts only when you ask for it by name.** Include `forge` or
+  `@forge` in your message ("forge, implement PROJ-123"). A message that
+  doesn't name Forge gets a normal response, even when it is about planning or
+  shipping work or mentions a work item key. If a message only mentions Forge
+  in passing, the agent asks whether you meant Forge before starting anything.
+- **Forge asks its questions in the chat.** While a workflow runs, the agent
+  asks each Forge question in its reply, as numbered choices, and waits for
+  your next message. Cursor's question tool is not visible to plugin hooks, so
+  an answer given there cannot be confirmed as yours and is not accepted.
+- **Workflows run straight through.** There is no pause between steps. To end
+  a run early, ask the agent to stop: the run ends with a recap of what it
+  produced and which steps did not run, and it is not recorded as abandoned.
+- **Step permissions are guidance, not blocks.** The hook no longer blocks
+  tools outside a step's declared categories; the agent follows them from the
+  step's instructions. The hook now holds tools in two situations only: while
+  a question is waiting for you, and while a write is waiting for your
+  approval.
+- **Terminal commands are never checked.** `Shell` and `WriteShellStdin`
+  pass every check whatever the command. The special cases added in 1.22.1
+  and 1.23.1 for read-only inspection commands, installed-skill reads and
+  visualization files are gone, because nothing needs an exception any more.
+- **Workflow authoring asks more before it saves.** It suggests the
+  dashboard's per-step settings when that is all you need, asks before saving
+  a step that writes as "Never asks", and says that a saved custom workflow
+  stops receiving Forge's updates to that workflow.
+
+### Added
+- **Steps set to "Always asks" hold their writes until you approve a plan.**
+  The agent shows you one write plan — what it will write, where, and a
+  preview — and nothing is written until you approve it: tracker, docs and
+  messaging writes, code-host connector writes, and file writes and deletions
+  are held. Skip and Keep as draft complete the step with nothing written.
+- **An answer must come from you.** The agent can post an answer to a
+  question Forge asked only after you have replied, so it cannot approve a
+  write plan on your behalf.
+- **Recovery after a lost reply.** When Forge's reply does not arrive in full,
+  `forge__get_workflow_state` restores the pending question, the active step
+  and its write lock. Until that re-sync, a step whose reply could not be read
+  holds its writes.
+
+### Fixed
+- **Guidance names the right answer field.** A pending question's answer goes
+  in the field it asks for (`user_answer` for a question), instead of always
+  `gate_answer`.
+- **Only Forge's own reply header changes the workflow state.** Findings or
+  quoted text in a reply body can no longer pin a question, release the write
+  lock or change the step's permissions.
+- **Checkpoints for a linked session carry its work item.** Engineering-time
+  checkpoints now name the work item the session was linked to.
+- **Local workflow state lasts 12 hours idle, up from 4**, matching Forge's
+  server.
+- **The required-skill reminder names the real step.** It no longer suggests
+  completing the workflow's name as if it were a step.
+
 ## [1.24.0] - 2026-09-16
 
 Includes Forge plugin 1.24.0. Cursor's version matches Forge's again.

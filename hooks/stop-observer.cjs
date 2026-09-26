@@ -70,7 +70,7 @@
  *     portable end-of-session safety net.
  *   - The reason text tells Claude to invoke forge-autopilot for tracking.
  *
- * @see plugin/hooks/prompt-router.cjs for active PDLC/epic detection
+ * @see plugin/hooks/prompt-router.cjs for the continuation and wake-check directives
  * @see plugin/hooks/session-state.cjs for state management
  * @see plugin/skills/forge-autopilot/SKILL.md for routing logic
  */
@@ -190,6 +190,12 @@ function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolv
   let clientSessionPayload = event.session_id
     ? `, client_session_id: "${event.session_id}"`
     : '';
+  // The linked work item, recorded by workflow-tracker.cjs from the observer's
+  // completion. Quoted, so the directive carries it as a value; null for an
+  // unlinked session (the server then keeps whatever the link stored).
+  const workItemKey = typeof state.work_item_key === 'string' && state.work_item_key
+    ? JSON.stringify(state.work_item_key)
+    : 'null';
   try {
     const tokens = captureTokenUsageFromResolved(resolved);
     if (tokens) {
@@ -226,7 +232,7 @@ function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolv
       `conversation_id: ${conversationId}, completed_step: session_observer, ` +
       `state_updates: { outcome: checkpoint, duration_ms: ${durationMs}, ` +
       `event_type: observation_outcome, ` +
-      `work_item_key: ${state.work_item_key || 'null'}, sdlc_stage: ${state.sdlc_stage || 'other'}${skillPayload}${tokenPayload}${clientSessionPayload} }". ` +
+      `work_item_key: ${workItemKey}, sdlc_stage: ${state.sdlc_stage || 'other'}${skillPayload}${tokenPayload}${clientSessionPayload} }". ` +
       `After calling the tool, continue normally without any additional output about this checkpoint.`,
   });
 }
@@ -297,17 +303,23 @@ function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null, de
  */
 function buildSkillContinuationResponse(state) {
   const convo = state.conversation_id || '<conversation_id>';
-  const step = state.current_step_skill || state.current_skill || 'the current step';
+  // `completed_step` must name the STEP. `current_skill` is the workflow id,
+  // so it may label the run in prose but never stand in for the step: posting
+  // it made the model complete a step that does not exist (contract audit).
+  // Every start that hands over a step names it now, so the placeholder is
+  // left for a preflight-gated start whose step has not been revealed yet.
+  const step = state.current_step_skill;
+  const label = step || state.current_skill || 'the current step';
   return JSON.stringify({
     decision: 'block',
     reason:
-      `FORGE WORKFLOW — do not stop yet. A local skill ran while the Forge step "${step}" is ` +
+      `FORGE WORKFLOW — do not stop yet. A local skill ran while the Forge step "${label}" is ` +
       `still in progress, and the turn ended WITHOUT calling forge__update_state. A skill ` +
       `instruction like "reply with only your output / nothing else" governs that skill's ` +
       `OUTPUT FORMAT only — it does NOT end the workflow step. Briefly relay the skill's key ` +
       `findings, then call forge__update_state (conversation_id: ${convo}, completed_step: ` +
-      `${step}, …) to complete the step. Calling forge__update_state is mandatory before this ` +
-      `turn may end.`,
+      `${step || '<the current step id from the last Forge reply>'}, …) to complete the step. ` +
+      `Calling forge__update_state is mandatory before this turn may end.`,
   });
 }
 
