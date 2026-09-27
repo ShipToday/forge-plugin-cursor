@@ -4,6 +4,12 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.4] - 2026-09-27
+
+### Fixed
+- Release a local recovery hold when the server confirms a workflow is gone or its idle deadline and recovery grace have passed.
+- Avoid a write hold after a server-refused update, and clean up stale session and recovery files even when another file is corrupt.
+
 ## [2.3.3] - 2026-09-26
 
 ### Fixed

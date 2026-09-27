@@ -180,11 +180,55 @@ function extractPendingCheckpointMetadata(response) {
  * pin), a NEXT STEP header means none is (release it and load the step's
  * tool permissions), and a RUN ENDED header means the run is over — completed,
  * stopped or abandoned — so everything its lost final reply would have
- * released is released. Anything else — an error, another conversation —
- * changes nothing, so state can only be released by a positive server signal.
+ * released is released. The one error that releases is the server's own
+ * "Conversation not found" for the run this session holds: the run expired
+ * after its idle window or was never known, so there is nothing left to
+ * restore and no later reply could lift the hold. Anything else — another
+ * error, another conversation — changes nothing.
  */
 // The status line of a recovery snapshot for a run that is over.
 const RUN_ENDED_LINE = /^\*\*RUN ENDED\*\*\s+—/;
+
+// The server's reply, from get_workflow_state or abandon_workflow, when it has
+// no such conversation. Read from the start of the reply only, where the tool
+// puts it; the rest of a reply is not the server's verdict.
+const WORKFLOW_GONE = /^\s*Failed to (?:fetch workflow state|abandon workflow): Conversation not found\./;
+
+// True when the reply says the run this session holds no longer exists. Only
+// a direct call reaches here with an error: a wrapped call's failed reply is
+// script output, and is never adopted.
+function heldRunGone(state, toolResponse, toolInput) {
+  if (typeof toolInput === 'string') { try { toolInput = JSON.parse(toolInput); } catch { return false; } }
+  const requested = toolInput?.conversation_id;
+  return !!state.active_workflow && typeof requested === 'string' && requested === state.conversation_id
+    && WORKFLOW_GONE.test(responseText(toolResponse));
+}
+
+// Release a run that is over, exactly as the completion branch in main()
+// does, together with its recovery hold.
+function releaseRun(sessionState) {
+  sessionState.write({
+    active_workflow: false,
+    observer_blocked: true,
+    conversation_id: null,
+    current_skill: null,
+    pending_checkpoint: false,
+    pending_checkpoint_step: null,
+    pending_checkpoint_at: null,
+    pending_checkpoint_question_id: null,
+    pending_checkpoint_response_field: null,
+    pending_checkpoint_asked_at: null,
+    pending_checkpoint_user_turn_at: null,
+    current_step_tools: null,
+    write_lock: null,
+    current_step_skill: null,
+    step_resync_required: false,
+    workflow_recovery_required: false,
+    workflow_expiry: null,
+    current_step_token: null,
+    last_checkpoint_at: new Date().toISOString(),
+  });
+}
 
 // get_workflow_state names the step by its composite id (`skill__N`); the rest
 // of the plugin keeps the bare skill id that update_state's headers carry, and
@@ -217,6 +261,10 @@ function startHeader(response) {
 
 function resyncFromStateRead(sessionState, toolResponse, toolInput) {
   const state = sessionState.read();
+  if (heldRunGone(state, toolResponse, toolInput)) {
+    releaseRun(sessionState);
+    return;
+  }
   if (toolResponse?.isError || toolResponse?.is_error) return;
   if (typeof toolInput === 'string') { try { toolInput = JSON.parse(toolInput); } catch { return; } }
   const requested = toolInput?.conversation_id;
@@ -224,8 +272,8 @@ function resyncFromStateRead(sessionState, toolResponse, toolInput) {
   const start = lines.findIndex((line) => line.startsWith('Workflow state for conversation `'));
   const conversation = start === -1 ? null : lines[start].match(/^Workflow state for conversation `([^`]+)`/);
   if (!conversation || (requested && conversation[1] !== requested)) return;
-  if (state.active_workflow && conversation[1] !== state.conversation_id && !state.workflow_binding_pending) return;
-  if ((!state.active_workflow || state.workflow_binding_pending) && conversation[1] !== requested) return;
+  if (state.active_workflow && conversation[1] !== state.conversation_id) return;
+  if (!state.active_workflow && conversation[1] !== requested) return;
 
   // Read the status only from the reply's own header block — the status line
   // and its metadata lines, up to the first blank line. The recovered findings
@@ -246,28 +294,7 @@ function resyncFromStateRead(sessionState, toolResponse, toolInput) {
   // step that no longer exists. Release the run exactly as the completion
   // branch in main() would have.
   if (RUN_ENDED_LINE.test(statusLine)) {
-    sessionState.write({
-      active_workflow: false,
-      observer_blocked: true,
-      conversation_id: null,
-      current_skill: null,
-      pending_checkpoint: false,
-      pending_checkpoint_step: null,
-      pending_checkpoint_at: null,
-      pending_checkpoint_question_id: null,
-      pending_checkpoint_response_field: null,
-      pending_checkpoint_asked_at: null,
-      pending_checkpoint_user_turn_at: null,
-      current_step_tools: null,
-      write_lock: null,
-      current_step_skill: null,
-      step_resync_required: false,
-      workflow_recovery_required: false,
-      workflow_binding_pending: false,
-      workflow_expiry: null,
-      current_step_token: null,
-      last_checkpoint_at: new Date().toISOString(),
-    });
+    releaseRun(sessionState);
     return;
   }
 
@@ -278,7 +305,6 @@ function resyncFromStateRead(sessionState, toolResponse, toolInput) {
     active_workflow: true, conversation_id: conversation[1],
     workflow_activity_at: new Date().toISOString(),
     workflow_recovery_required: false, step_resync_required: false,
-    workflow_binding_pending: false,
     ...(token ? { current_step_token: token } : {}),
     ...(expiry ? { workflow_expiry: expiry } : {}),
   };
@@ -1061,6 +1087,13 @@ async function main() {
     return;
   }
 
+  // Nothing to abandon: the server no longer has the run this session holds.
+  // Release it the way a recovery read reporting the same would.
+  if (isAbandon && heldRunGone(sessionState.read(), toolResponse, event.tool_input)) {
+    releaseRun(sessionState);
+    return;
+  }
+
   // Workflow start: mark session as active and capture context
   if (isWorkflowStart && isValidWorkflowResponse(toolResponse)) {
     const conversationId = extractConversationId(toolResponse);
@@ -1082,7 +1115,6 @@ async function main() {
       // the lower bound of the active-time window it stamps onto duration_ms.
       step_active_since: new Date().toISOString(),
       workflow_recovery_required: false,
-      workflow_binding_pending: false,
       workflow_expiry: expiryMetadata(startHeader(toolResponse)) || null,
       workflow_activity_at: new Date().toISOString(),
       current_step_token: startHeader(toolResponse).match(/^\*\*Step Token\*\*: `([^`]+)`/m)?.[1] || null,
@@ -1137,7 +1169,8 @@ async function main() {
     if (typeof callInput === 'string') { try { callInput = JSON.parse(callInput); } catch { return; } }
     const tracked = sessionState.read();
     if (tracked.active_workflow && callInput?.conversation_id && callInput.conversation_id !== tracked.conversation_id) return;
-    if (header.expiry === false || toolResponse?.isError || toolResponse?.is_error) {
+    if (toolResponse?.isError || toolResponse?.is_error) return;
+    if (header.expiry === false) {
       if (tracked.active_workflow) sessionState.write({ step_resync_required: true });
       return;
     }
@@ -1307,8 +1340,10 @@ async function main() {
     // (its shell and no lock, into a step that may be locked), so the step is
     // marked unverified and workflow-guard holds writes until
     // forge__get_workflow_state re-syncs it. The one exception is the server's
-    // own `Error:` reply: the call was refused and the run did not move.
-    const refused = /^\s*Error: /.test(responseText(toolResponse));
+    // own error reply (`isError` or `Error:`): the call was refused and the
+    // run did not move.
+    const refused = toolResponse?.isError === true || toolResponse?.is_error === true
+      || /^\s*Error: /.test(responseText(toolResponse));
     if (header.marker) {
       sessionState.write({ step_resync_required: false });
     } else if (!header.complete && !refused && sessionState.read().active_workflow) {
