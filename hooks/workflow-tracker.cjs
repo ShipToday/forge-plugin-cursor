@@ -27,7 +27,7 @@
 'use strict';
 
 const sessionStateModule = require('./session-state.cjs');
-const { normalizeToolEvent, wrappedForgeCall } = require('./tool-event.cjs');
+const { normalizeToolEvent, wrappedForgeCall, identifyForgeCall } = require('./tool-event.cjs');
 
 // -- Tool name patterns (MCP names include dynamic server UUIDs) --------------
 
@@ -973,6 +973,16 @@ async function main() {
     event = JSON.parse(input.trim());
   } catch {
     return; // Malformed input — exit silently
+  }
+
+  // Claude Code reports a failed call — an MCP result with isError, or a
+  // transport error — as PostToolUseFailure: no tool_response, and the reply's
+  // text in `error`. Give a failed Forge call the failed-reply shape the
+  // branches below already read. A failed call to any other tool did nothing
+  // this hook records.
+  if (event.hook_event_name === 'PostToolUseFailure') {
+    if (!identifyForgeCall(event)) return;
+    event = { ...event, tool_response: { isError: true, content: [{ type: 'text', text: String(event.error ?? '') }] } };
   }
 
   const rawToolName = event.tool_name;
