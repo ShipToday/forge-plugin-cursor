@@ -27,7 +27,7 @@
 'use strict';
 
 const sessionStateModule = require('./session-state.cjs');
-const { normalizeToolEvent, wrappedForgeCall } = require('./tool-event.cjs');
+const { normalizeToolEvent, wrappedForgeCall, identifyForgeCall } = require('./tool-event.cjs');
 
 // -- Tool name patterns (MCP names include dynamic server UUIDs) --------------
 
@@ -180,11 +180,55 @@ function extractPendingCheckpointMetadata(response) {
  * pin), a NEXT STEP header means none is (release it and load the step's
  * tool permissions), and a RUN ENDED header means the run is over — completed,
  * stopped or abandoned — so everything its lost final reply would have
- * released is released. Anything else — an error, another conversation —
- * changes nothing, so state can only be released by a positive server signal.
+ * released is released. The one error that releases is the server's own
+ * "Conversation not found" for the run this session holds: the run expired
+ * after its idle window or was never known, so there is nothing left to
+ * restore and no later reply could lift the hold. Anything else — another
+ * error, another conversation — changes nothing.
  */
 // The status line of a recovery snapshot for a run that is over.
 const RUN_ENDED_LINE = /^\*\*RUN ENDED\*\*\s+—/;
+
+// The server's reply, from get_workflow_state or abandon_workflow, when it has
+// no such conversation. Read from the start of the reply only, where the tool
+// puts it; the rest of a reply is not the server's verdict.
+const WORKFLOW_GONE = /^\s*Failed to (?:fetch workflow state|abandon workflow): Conversation not found\./;
+
+// True when the reply says the run this session holds no longer exists. Only
+// a direct call reaches here with an error: a wrapped call's failed reply is
+// script output, and is never adopted.
+function heldRunGone(state, toolResponse, toolInput) {
+  if (typeof toolInput === 'string') { try { toolInput = JSON.parse(toolInput); } catch { return false; } }
+  const requested = toolInput?.conversation_id;
+  return !!state.active_workflow && typeof requested === 'string' && requested === state.conversation_id
+    && WORKFLOW_GONE.test(responseText(toolResponse));
+}
+
+// Release a run that is over, exactly as the completion branch in main()
+// does, together with its recovery hold.
+function releaseRun(sessionState) {
+  sessionState.write({
+    active_workflow: false,
+    observer_blocked: true,
+    conversation_id: null,
+    current_skill: null,
+    pending_checkpoint: false,
+    pending_checkpoint_step: null,
+    pending_checkpoint_at: null,
+    pending_checkpoint_question_id: null,
+    pending_checkpoint_response_field: null,
+    pending_checkpoint_asked_at: null,
+    pending_checkpoint_user_turn_at: null,
+    current_step_tools: null,
+    write_lock: null,
+    current_step_skill: null,
+    step_resync_required: false,
+    workflow_recovery_required: false,
+    workflow_expiry: null,
+    current_step_token: null,
+    last_checkpoint_at: new Date().toISOString(),
+  });
+}
 
 // get_workflow_state names the step by its composite id (`skill__N`); the rest
 // of the plugin keeps the bare skill id that update_state's headers carry, and
@@ -195,13 +239,43 @@ function bareStepId(stepId) {
   return index === -1 ? stepId : stepId.slice(0, index);
 }
 
-function resyncFromStateRead(sessionState, toolResponse) {
+function expiryMetadata(text) {
+  const match = text.match(/^\*\*Workflow Expiry\*\*: (.+)$/m);
+  if (!match) return null;
+  try {
+    const value = JSON.parse(match[1]);
+    if (Number.isInteger(value.days) && value.days >= 1 && value.days <= 7
+      && ['setting', 'default', 'fallback'].includes(value.source)) return { days: value.days, source: value.source };
+  } catch { /* malformed metadata is not recovery authority */ }
+  return false;
+}
+
+function startHeader(response) {
+  const lines = trustedText(response).split(/\r?\n/);
+  const start = lines.findIndex(line => line.startsWith('**Conversation ID**:'));
+  if (start < 0) return '';
+  let end = start;
+  while (end < lines.length && lines[end].trim()) end++;
+  return lines.slice(start, end).join('\n');
+}
+
+function resyncFromStateRead(sessionState, toolResponse, toolInput) {
   const state = sessionState.read();
-  if (!state.active_workflow) return;
+  if (heldRunGone(state, toolResponse, toolInput)) {
+    releaseRun(sessionState);
+    return;
+  }
+  if (toolResponse?.isError || toolResponse?.is_error) return;
+  if (typeof toolInput === 'string') { try { toolInput = JSON.parse(toolInput); } catch { return; } }
+  const requested = toolInput?.conversation_id;
   const lines = responseText(toolResponse).split('\n');
   const start = lines.findIndex((line) => line.startsWith('Workflow state for conversation `'));
   const conversation = start === -1 ? null : lines[start].match(/^Workflow state for conversation `([^`]+)`/);
-  if (!conversation || conversation[1] !== state.conversation_id) return;
+  if (!conversation || (requested && conversation[1] !== requested)) return;
+  // A held run is re-synced only by its own snapshot. A session holding none
+  // binds the run it asked for, once the server shows it exists.
+  if (state.active_workflow && conversation[1] !== state.conversation_id) return;
+  if (!state.active_workflow && conversation[1] !== requested) return;
 
   // Read the status only from the reply's own header block — the status line
   // and its metadata lines, up to the first blank line. The recovered findings
@@ -212,34 +286,30 @@ function resyncFromStateRead(sessionState, toolResponse) {
   const header = [];
   while (index < lines.length && lines[index].trim()) header.push(lines[index++]);
   const statusLine = header[0] || '';
+  const headerText = header.join('\n');
+  const expiry = expiryMetadata(headerText);
+  const token = headerText.match(/^\*\*Step Token\*\*: `([^`]+)`/m)?.[1];
+  if (expiry === false) return;
 
   // The run is over, and its final reply (or the stop or abandon reply) never
   // arrived here: the recovery hold it left would otherwise wait forever on a
   // step that no longer exists. Release the run exactly as the completion
   // branch in main() would have.
   if (RUN_ENDED_LINE.test(statusLine)) {
-    sessionState.write({
-      active_workflow: false,
-      observer_blocked: true,
-      conversation_id: null,
-      current_skill: null,
-      pending_checkpoint: false,
-      pending_checkpoint_step: null,
-      pending_checkpoint_at: null,
-      pending_checkpoint_question_id: null,
-      pending_checkpoint_response_field: null,
-      pending_checkpoint_asked_at: null,
-      pending_checkpoint_user_turn_at: null,
-      current_step_tools: null,
-      write_lock: null,
-      current_step_skill: null,
-      step_resync_required: false,
-      last_checkpoint_at: new Date().toISOString(),
-    });
+    releaseRun(sessionState);
     return;
   }
 
   const pendingStep = extractPendingCheckpointStep(statusLine);
+  // New bindings and modern snapshots need a complete token-bearing header.
+  if ((!state.active_workflow || state.workflow_recovery_required || expiry) && !token) return;
+  const recovered = {
+    active_workflow: true, conversation_id: conversation[1],
+    workflow_activity_at: new Date().toISOString(),
+    workflow_recovery_required: false, step_resync_required: false,
+    ...(token ? { current_step_token: token } : {}),
+    ...(expiry ? { workflow_expiry: expiry } : {}),
+  };
   if (pendingStep) {
     const metadata = extractPendingCheckpointMetadata(toolResponse);
     // A recovery that re-serves the question already pinned keeps the pin time
@@ -249,6 +319,10 @@ function resyncFromStateRead(sessionState, toolResponse) {
     const sameQuestion = state.pending_checkpoint === true
       && (!metadata.questionId || !state.pending_checkpoint_question_id || metadata.questionId === state.pending_checkpoint_question_id);
     sessionState.write({
+      ...recovered,
+      current_step_skill: bareStepId(pendingStep),
+      current_step_tools: extractToolPermissions(headerText),
+      write_lock: extractWriteLock(headerText) || state.write_lock,
       pending_checkpoint: true,
       pending_checkpoint_step: bareStepId(pendingStep),
       pending_checkpoint_at: sameQuestion && state.pending_checkpoint_at ? state.pending_checkpoint_at : new Date().toISOString(),
@@ -262,6 +336,7 @@ function resyncFromStateRead(sessionState, toolResponse) {
   const nextStep = statusLine.match(/^\*\*NEXT STEP\*\*:\s*"([^"]+)"/);
   if (!nextStep) return;
   sessionState.write({
+    ...recovered,
     pending_checkpoint: false,
     pending_checkpoint_step: null,
     pending_checkpoint_at: null,
@@ -295,7 +370,7 @@ const MARKER_LINE = /^\*\*(?:(NEXT STEP)\*\*:\s*|(CHECKPOINT|RE-ENTRY)\*\*\s+—
 // Permissions and Step Token, so leaving it out
 // ended the header at that line — the lock went unread and the Step Token
 // after it fell into the body.
-const METADATA_LINE = /^\*\*(?:Idempotent Retry|Model Routing|Tool Permissions|Write Lock|Step Token|Question ID|Response Field)\*\*:/;
+const METADATA_LINE = /^\*\*(?:Idempotent Retry|Model Routing|Tool Permissions|Write Lock|Step Token|Workflow Expiry|Question ID|Response Field)\*\*:/;
 const DISPLAY_BLOCK_OPEN = /^(?:> \*\*Relay to the user\*\*|<<<FORGE_DISPLAY_VERBATIM\b)/;
 const DISPLAY_BLOCK_CLOSE = '<<<END FORGE_DISPLAY_VERBATIM>>>';
 // The caption the server puts above a finished step's `## Findings` block.
@@ -583,6 +658,8 @@ function parseReplyHeader(response, { wrapped = false } = {}) {
     // the write lock is authorization state, and a body that could name a
     // released lock would unlock the guard.
     writeLock: extractWriteLock(header.join('\n')),
+    expiry: expiryMetadata(header.join('\n')),
+    stepToken: header.join('\n').match(/^\*\*Step Token\*\*: `([^`]+)`/m)?.[1],
     // A marker means the run goes on. Without one, the status line completes
     // the run when it counts the last step, or when it is a skill's.
     complete: !kind && !!status && (!counts || counts[1] === counts[2]),
@@ -898,6 +975,16 @@ async function main() {
     return; // Malformed input — exit silently
   }
 
+  // Claude Code reports a failed call — an MCP result with isError, or a
+  // transport error — as PostToolUseFailure: no tool_response, and the reply's
+  // text in `error`. Give a failed Forge call the failed-reply shape the
+  // branches below already read. A failed call to any other tool did nothing
+  // this hook records.
+  if (event.hook_event_name === 'PostToolUseFailure') {
+    if (!identifyForgeCall(event)) return;
+    event = { ...event, tool_response: { isError: true, content: [{ type: 'text', text: String(event.error ?? '') }] } };
+  }
+
   const rawToolName = event.tool_name;
   const rawEvent = event;
   event = normalizeToolEvent(event);
@@ -954,7 +1041,7 @@ async function main() {
 
   // Recovery reads re-sync the CHECKPOINT pin and nothing else.
   if (toolName.includes(WORKFLOW_STATE_READ_PATTERN)) {
-    resyncFromStateRead(sessionState, toolResponse);
+    resyncFromStateRead(sessionState, toolResponse, event.tool_input);
     return;
   }
 
@@ -1012,6 +1099,13 @@ async function main() {
     return;
   }
 
+  // Nothing to abandon: the server no longer has the run this session holds.
+  // Release it the way a recovery read reporting the same would.
+  if (isAbandon && heldRunGone(sessionState.read(), toolResponse, event.tool_input)) {
+    releaseRun(sessionState);
+    return;
+  }
+
   // Workflow start: mark session as active and capture context
   if (isWorkflowStart && isValidWorkflowResponse(toolResponse)) {
     const conversationId = extractConversationId(toolResponse);
@@ -1032,6 +1126,10 @@ async function main() {
       // Active time: the first step begins now. workflow-guard reads this as
       // the lower bound of the active-time window it stamps onto duration_ms.
       step_active_since: new Date().toISOString(),
+      workflow_recovery_required: false,
+      workflow_expiry: expiryMetadata(startHeader(toolResponse)) || null,
+      workflow_activity_at: new Date().toISOString(),
+      current_step_token: startHeader(toolResponse).match(/^\*\*Step Token\*\*: `([^`]+)`/m)?.[1] || null,
     };
     // Pin the observe_session conversation id separately so the periodic
     // Stop-hook checkpoint can target it after the workflow completes —
@@ -1079,6 +1177,28 @@ async function main() {
   // use it for checkpoint logic. Claude is instructed to write this itself,
   // but it inconsistently forgets — this hook makes it reliable.
   if (isStateUpdate) {
+    let callInput = event.tool_input;
+    if (typeof callInput === 'string') { try { callInput = JSON.parse(callInput); } catch { return; } }
+    const tracked = sessionState.read();
+    if (tracked.active_workflow && callInput?.conversation_id && callInput.conversation_id !== tracked.conversation_id) return;
+    // A failed call never advances local state. Only the server's own `Error:`
+    // refusal proves the run did not move; a transport failure or an internal
+    // error, which the host reports the same way, may have advanced it.
+    if (toolResponse?.isError || toolResponse?.is_error) {
+      if (tracked.active_workflow && !/^\s*Error: /.test(responseText(toolResponse))) {
+        sessionState.write({ step_resync_required: true });
+      }
+      return;
+    }
+    if (header.expiry === false) {
+      if (tracked.active_workflow) sessionState.write({ step_resync_required: true });
+      return;
+    }
+    if (tracked.workflow_recovery_required) return;
+    if (header.marker && header.stepToken) {
+      sessionState.write({ current_step_token: header.stepToken, workflow_activity_at: new Date().toISOString(),
+        ...(header.expiry ? { workflow_expiry: header.expiry } : {}) });
+    }
     // Any forge__update_state means the model is driving the workflow
     // forward (advance, checkpoint, re-entry, or completion) — disarm the
     // required-skill continuation backstop so the Stop hook does not nudge.
@@ -1241,6 +1361,7 @@ async function main() {
     // marked unverified and workflow-guard holds writes until
     // forge__get_workflow_state re-syncs it. The one exception is the server's
     // own `Error:` reply: the call was refused and the run did not move.
+    // (A failed call returned above; this covers an unflagged `Error:` reply.)
     const refused = /^\s*Error: /.test(responseText(toolResponse));
     if (header.marker) {
       sessionState.write({ step_resync_required: false });
