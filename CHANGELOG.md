@@ -4,6 +4,21 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.5] - 2026-09-28
+
+### Changed
+- **Workflow proposals read as plain language.** When an admin authors a
+  workflow, the proposal describes what each new step will do instead of
+  pasting its instruction text, leaves out internal field and payload
+  shapes, and uses plain Markdown. The exact instruction text is still
+  available on request.
+
+### Fixed
+- **No false update warning when saving a new workflow.** The save
+  confirmation now warns that a workflow stops receiving Forge's updates
+  only when it is an override of an existing workflow. A brand-new
+  workflow is described as new, with no Forge updates to miss.
+
 ## [2.3.4] - 2026-09-27
 
 ### Fixed
