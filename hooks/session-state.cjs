@@ -120,6 +120,12 @@ function idleState(state, lastTouched, sessionId, fp) {
 const LOCK_RETRY_MS = 10;
 const LOCK_MAX_WAIT_MS = 750;
 const STALE_LOCK_MS = 5 * 1000;
+// The wait for a writer that must not drop its update (`waitOutStaleLock`).
+// A lock can outlive LOCK_MAX_WAIT_MS without being stale — a parallel hook
+// that is slow to write, or a lock whose removal failed — and until it is
+// reclaimed every writer that gives up loses its update. Waiting past the
+// stale threshold means the writer either gets the lock or reclaims it.
+const LOCK_OUTLAST_STALE_MS = STALE_LOCK_MS + 1000;
 const PARSE_RETRIES = 4;
 
 function waitBriefly(ms) {
@@ -370,15 +376,21 @@ function cleanupStale() {
  * hook event; a falsy value yields the cwd-only fallback file.
  *
  * @param {string|undefined} sessionId — Claude Code session id
+ * @param {{ waitOutStaleLock?: boolean }} [options] — `waitOutStaleLock`: a
+ *   write waits until a lock another hook holds is released or can be
+ *   reclaimed, instead of giving up after LOCK_MAX_WAIT_MS. For a hook whose
+ *   writes must not be dropped; hooks that block a prompt or a tool call keep
+ *   the short wait.
  * @returns {{ read: Function, write: Function, increment: Function, stateFilePath: string }}
  */
-function forSession(sessionId) {
+function forSession(sessionId, { waitOutStaleLock = false } = {}) {
   const fp = statePath(sessionId);
+  const lockWaitMs = waitOutStaleLock ? LOCK_OUTLAST_STALE_MS : LOCK_MAX_WAIT_MS;
 
   function withLock(action) {
     ensureDir();
     const lockPath = `${fp}.lock`;
-    const deadline = Date.now() + LOCK_MAX_WAIT_MS;
+    const deadline = Date.now() + lockWaitMs;
     while (true) {
       try {
         fs.mkdirSync(lockPath);
