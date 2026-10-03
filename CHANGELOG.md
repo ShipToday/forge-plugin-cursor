@@ -4,6 +4,30 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-09-30
+
+### Added
+- **Authored skills say what they need to read.** When an admin authors a
+  workflow with a new skill, the proposal now states what that skill must
+  read before it runs (a linked ticket, the repository) and why, so it can
+  be corrected before saving. A skill that uses a capability which depends
+  on one of those reads gets it added, and the check runs again before the
+  save. On an older Forge server the existing settings are kept as they are.
+
+### Changed
+- **Workflow authoring asks its fixed-choice questions together.** Where the
+  workflow lives, who can run it, and whether the draft looks right are asked
+  in one go instead of one by one, through the question UI when one is
+  available. Scope is always asked: when no teams are found, the agent says
+  so and still asks rather than assuming the whole org.
+
+### Fixed
+- **A finished workflow is no longer left looking active.** When two hooks
+  wrote session state at the same moment, the one recording a workflow's
+  completion could give up and lose it, leaving the finished run holding its
+  write lock until the next re-sync. It now waits for the other write to
+  finish.
+
 ## [2.3.5] - 2026-09-28
 
 ### Changed
