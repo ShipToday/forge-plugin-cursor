@@ -4,6 +4,19 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-10-04
+
+### Added
+- **Workflow authoring starts from how your org works.** When Forge has a
+  picture of how your team defines, builds, reviews and releases work, the
+  authoring skill starts from it: its first question or proposal cites what
+  it found, and a team skill is required on a step only when every surveyed
+  repository has it. Skills found in fewer repositories are named as "use
+  when present".
+- **A request no workflow covers can still be worked out with Forge.** Forge
+  proposes steps that fit the request, and the agent shows them to you and
+  asks before anything starts; it never confirms them on your behalf.
+
 ## [2.4.0] - 2026-09-30
 
 ### Added
