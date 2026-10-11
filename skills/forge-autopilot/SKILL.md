@@ -98,17 +98,27 @@ chaining; those examples omit conditional host-only fields for readability.
 
 ### Codex question lifetime
 
-For Forge decisions, approvals, and routing questions on Codex, do not use
-`request_user_input_async`: its picker can close when the turn ends or the UI
-times out, even after `accepted:true`. Prefer blocking `request_user_input`
-only when callable and permitted in the current mode. If only the async tool
-is available, show persistent numbered choices and ask for a numbered reply.
-Do not force Plan mode or keep a picker alive with sleeps or polling. If an
-async question was already submitted, show the same choices and reply
-instructions before ending the turn; do not submit a second picker or claim
-the first remains visible. Record any required submitted receipt without an
-answer, and wait for the actual reply. This restriction is Codex-only:
-Claude Code continues to use `AskUserQuestion` and its existing wait protocol.
+For fixed choices, prefer supported, permitted native UI. Forge may use a
+negotiated MCP form; after an answered RE-ENTRY, never ask the question again.
+Otherwise use `request_user_input` or `request_user_input_async` only when
+callable and permitted for this question's purpose in the current mode.
+Prefer a compatible blocking control. A permitted async picker may be used
+once; its string options carry exact labels, so show descriptions and full
+approval material in prose before opening it. Respect each tool's actual
+schema: blocking input accepts 2–3 options; that limit does not apply to every
+native control. Do not remove choices to make them fit.
+
+An acknowledgment such as `accepted:true` records submitted delivery only,
+with no answer. Retain the pending question ID, step token and option keys;
+wait for the actual user selection or explicit typed reply before dependent
+work. The async picker can close at turn end or timeout: show the same
+numbered recovery choices before ending the turn unless the user has already
+answered. Never re-open it automatically, force Plan mode, probe forbidden
+tools, or keep it alive with sleeps or polling. A resolved UI event can be
+cleanup, not an answer. Do not bypass host policy rejection through another
+tool. When native input is unavailable or prohibited, use persistent numbered
+choices. Other hosts keep their permitted native controls and existing wait
+protocol.
 
 ### Trigger rule — check before calling Forge
 

@@ -1058,6 +1058,10 @@ async function main() {
   // compared against the pin's, and a call made before the question existed
   // proves nothing about it.
   if (QUESTION_TOOL_RE.test(toolName)) {
+    // Async submission can return accepted:true before anybody answers.
+    // It is not evidence for answerWithoutAsking; the later user turn is.
+    // Failed blocking calls likewise cannot establish that a user was asked.
+    if (/request_user_input_async$/.test(toolName) || toolResponse?.isError || toolResponse?.is_error) return;
     const state = sessionState.read();
     if (state.active_workflow && state.pending_checkpoint) {
       sessionState.write({ pending_checkpoint_asked_at: new Date().toISOString() });

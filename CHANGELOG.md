@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offers to build one. Takes effect once the Forge server sends paged
   catalogs.
 
+### Changed
+- **Saving, deleting and sending always follow an explicit answer.** The
+  workflow-authoring and feedback skills show the complete proposal or
+  payload before they ask, act only on an explicit confirmation of what was
+  shown, and ask again when it changes. A question that was merely
+  delivered, or a preselected default, never counts as a yes.
+- **Question guidance for Codex was revised.** The skills carry updated
+  rules for Codex's question tools. Nothing changes on Cursor: Forge's
+  questions are still asked in the reply as numbered choices.
+
 ## [2.5.0] - 2026-10-04
 
 ### Added
