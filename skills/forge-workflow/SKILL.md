@@ -57,6 +57,37 @@ in sync.
 
 ## How to ask the admin
 
+### Codex question lifetime
+
+For fixed choices, prefer supported, permitted native UI. Forge may use a
+negotiated MCP form; after an answered RE-ENTRY, never ask the question again.
+Otherwise use `request_user_input` or `request_user_input_async` only when
+callable and permitted for this question's purpose in the current mode.
+Prefer a compatible blocking control. A permitted async picker may be used
+once; its string options carry exact labels, so show descriptions and full
+approval material in prose before opening it. Respect each tool's actual
+schema: blocking input accepts 2–3 options; that limit does not apply to every
+native control. Do not remove choices to make them fit.
+
+An acknowledgment such as `accepted:true` records submitted delivery only,
+with no answer. Retain the pending question ID, step token and option keys;
+wait for the actual user selection or explicit typed reply before dependent
+work. The async picker can close at turn end or timeout: show the same
+numbered recovery choices before ending the turn unless the user has already
+answered. Never re-open it automatically, force Plan mode, probe forbidden
+tools, or keep it alive with sleeps or polling. A resolved UI event can be
+cleanup, not an answer. Do not bypass host policy rejection through another
+tool. When native input is unavailable or prohibited, use persistent numbered
+choices. Other hosts keep their permitted native controls and existing wait
+protocol.
+
+### Asking the admin's decisions
+
+Show the complete save or delete proposal before the question, and perform
+that write only after explicit confirmation of the displayed proposal. An
+acknowledgment or preselected default never authorizes saving or deleting.
+Changes to the proposal require confirmation again.
+
 Any question with a fixed set of answers goes through a structured
 user-input tool when one is available, rather than a numbered list in
 your prose. That covers scope, who can run the workflow, a yes/no, a

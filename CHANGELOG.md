@@ -4,6 +4,27 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-10-10
+
+### Added
+- **Large workflow catalogs are read in full before Forge says nothing
+  fits.** When the list of workflows is too long for one reply, Forge sends
+  it in pages or with shortened entries, and the routing skill tells the
+  agent how to read the rest. If a reply arrives cut short, the agent reads
+  the catalog again before it reports that no workflow covers a request or
+  offers to build one. Takes effect once the Forge server sends paged
+  catalogs.
+
+### Changed
+- **Saving, deleting and sending always follow an explicit answer.** The
+  workflow-authoring and feedback skills show the complete proposal or
+  payload before they ask, act only on an explicit confirmation of what was
+  shown, and ask again when it changes. A question that was merely
+  delivered, or a preselected default, never counts as a yes.
+- **Question guidance for Codex was revised.** The skills carry updated
+  rules for Codex's question tools. Nothing changes on Cursor: Forge's
+  questions are still asked in the reply as numbered choices.
+
 ## [2.5.0] - 2026-10-04
 
 ### Added

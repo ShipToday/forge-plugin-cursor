@@ -98,17 +98,27 @@ chaining; those examples omit conditional host-only fields for readability.
 
 ### Codex question lifetime
 
-For Forge decisions, approvals, and routing questions on Codex, do not use
-`request_user_input_async`: its picker can close when the turn ends or the UI
-times out, even after `accepted:true`. Prefer blocking `request_user_input`
-only when callable and permitted in the current mode. If only the async tool
-is available, show persistent numbered choices and ask for a numbered reply.
-Do not force Plan mode or keep a picker alive with sleeps or polling. If an
-async question was already submitted, show the same choices and reply
-instructions before ending the turn; do not submit a second picker or claim
-the first remains visible. Record any required submitted receipt without an
-answer, and wait for the actual reply. This restriction is Codex-only:
-Claude Code continues to use `AskUserQuestion` and its existing wait protocol.
+For fixed choices, prefer supported, permitted native UI. Forge may use a
+negotiated MCP form; after an answered RE-ENTRY, never ask the question again.
+Otherwise use `request_user_input` or `request_user_input_async` only when
+callable and permitted for this question's purpose in the current mode.
+Prefer a compatible blocking control. A permitted async picker may be used
+once; its string options carry exact labels, so show descriptions and full
+approval material in prose before opening it. Respect each tool's actual
+schema: blocking input accepts 2–3 options; that limit does not apply to every
+native control. Do not remove choices to make them fit.
+
+An acknowledgment such as `accepted:true` records submitted delivery only,
+with no answer. Retain the pending question ID, step token and option keys;
+wait for the actual user selection or explicit typed reply before dependent
+work. The async picker can close at turn end or timeout: show the same
+numbered recovery choices before ending the turn unless the user has already
+answered. Never re-open it automatically, force Plan mode, probe forbidden
+tools, or keep it alive with sleeps or polling. A resolved UI event can be
+cleanup, not an answer. Do not bypass host policy rejection through another
+tool. When native input is unavailable or prohibited, use persistent numbered
+choices. Other hosts keep their permitted native controls and existing wait
+protocol.
 
 ### Trigger rule — check before calling Forge
 
@@ -183,6 +193,36 @@ returns the enabled workflow catalog for this user and organization.
 
 The server-provided workflow catalog is the source of truth; the client AI
 owns the contextual choice among those available workflows.
+
+### When the catalog is paged, shortened or incomplete
+
+Forge keeps a routing reply small enough for the host to show it whole, so a
+large catalog can arrive in pieces. Every catalog opens with a `**Catalog**` line
+— how many workflows it holds, whether all of them are listed or which page
+this is, and a version — and closes with an end line.
+
+- **Pages.** When the line says `page 1 of N`, the reply lists that page only.
+  Route to a workflow on it when it clearly delivers what was asked. Before
+  deciding that nothing fits, or choosing between candidates, read the rest:
+  re-call `forge__start_workflow` with the same arguments plus
+  `catalog_page: 2`, then each page after it. If a page reports a different
+  version, the catalog changed while you were reading: start again at page 1.
+- **Shortened entries.** An entry ending in "…" was trimmed to fit. Before
+  choosing between workflows that look close, or ruling one out on a trimmed
+  entry, re-call with the same arguments plus `catalog_details: [<ids>]` (up
+  to 8) for their full routing hints. Hints come back whole; when they are
+  too long for one reply the answer says which page it is, and you read on
+  with the same `catalog_details` plus `catalog_page`.
+- **A reply that did not arrive whole.** If you see fewer workflows than the
+  `**Catalog**` line states, no end line, or any part of the reply was cut off
+  or replaced by a notice (a truncation marker, a "saved to a file" pointer),
+  the catalog you hold is incomplete. Do not tell the user no workflow exists,
+  do not work out an approach and do not offer to build a workflow from it:
+  re-call with the same arguments plus `catalog_page: 1` and read every page
+  first.
+
+Neither argument starts anything. Both list only workflows this user can
+route to, so a workflow missing from every page is not available here.
 
 ### Admission proposal — validate before activation
 
