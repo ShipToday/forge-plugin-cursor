@@ -4,6 +4,20 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-10-23
+
+### Changed
+- **A documents step can save its approved document into the repository.**
+  When a step that writes documents routes an approved document into your
+  repository, the agent may create or update that one document with `Write`,
+  `Edit` or `apply_patch`, following the layout of the documents around it.
+  It does not edit application code or configuration, and it does not
+  commit, push or open a pull request to deliver the document.
+- **Code-editing permission covers application code and other repository
+  edits** beyond that single document.
+- **Question guidance for Codex was revised again.** Nothing changes on
+  Cursor: Forge's questions are still asked in the reply as numbered choices.
+
 ## [2.6.0] - 2026-10-10
 
 ### Added
