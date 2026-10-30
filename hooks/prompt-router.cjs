@@ -133,6 +133,13 @@ async function main() {
     persist(sessionState, { pending_checkpoint_user_turn_at: at });
     state.pending_checkpoint_user_turn_at = at;
   }
+  // The same turn answers a question a parked run is waiting on (a workflow
+  // started while that run was mid-step); see session-state.cjs.
+  if (sessionStateModule.stampParkedUserTurn(state, new Date().toISOString())) {
+    try {
+      sessionState.update((current) => sessionStateModule.stampParkedUserTurn(current, new Date().toISOString()));
+    } catch { /* keep routing */ }
+  }
 
   // Step 0: seed the git baseline BEFORE this turn's work happens.
   // stop-observer.cjs detects a commit by comparing HEAD against this value
@@ -186,7 +193,11 @@ async function main() {
     return;
   }
 
-  // Step 3: Snoozed → ask Claude to re-evaluate against the wake condition
+  // Step 3: Snoozed → ask Claude to re-evaluate against the wake condition.
+  // Not after a decline: "keep a record?" is asked at most once a
+  // session, and a wake check would have the model bring it back on its own
+  // judgment. Asking Forge to track the session still routes to the observer.
+  if (state.status === 'snoozed' && state.declined_once) return;
   if (state.status === 'snoozed') {
     const wake = state.wake_condition || 'user signals readiness to move forward';
     emitWakeConditionCheck(wake);

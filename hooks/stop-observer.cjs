@@ -244,7 +244,7 @@ function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolv
 // its own link/create/ad-hoc/snooze/dismiss (or "defer") outcome. Keeping this short matters
 // because some clients (Codex, Cursor) surface the Stop-hook block reason to
 // the user verbatim, where the old ~30-line block read as noise.
-function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null, declinedOnce = false) {
+function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null) {
   // The nudge's "why now" must match how long the session has
   // ACTUALLY been running. The eligibility gate already computed both
   // figures to make its decision, so they are threaded through here rather
@@ -263,19 +263,12 @@ function buildBlockResponse(stateFilePath, turnCount = null, activeMs = null, de
   const context = elapsed
     ? `This session has been going for ${elapsed}. Say so if you explain why you are checking in now. `
     : '';
-  // A re-offer after a soft decline must not repeat the first
-  // one verbatim. The user already said no once; asking again in identical
-  // words reads as not having listened — and since a soft decline and a
-  // snooze now behave alike, this copy is the only difference they can
-  // actually perceive.
-  const reoffer = declinedOnce
-    ? `The user already declined this once in this session, so do NOT repeat the earlier offer word for word: `
-      + `open by acknowledging that, say briefly what has changed since, and keep it shorter than the first. `
-    : '';
+  // No re-offer wording: a declined offer never returns in the
+  // same session (Step 4), so every offer this builds is the first.
   return JSON.stringify({
     decision: 'block',
     reason:
-      `FORGE OBSERVATION: ${context}${reoffer}Before stopping, decide whether this session involved any product ` +
+      `FORGE OBSERVATION: ${context}Before stopping, decide whether this session involved any product ` +
       `or engineering work across the software development lifecycle (SDLC) — defining, planning, ` +
       `building, testing, reviewing, or discussing code or features (reading or analyzing code to ` +
       `understand it counts). If it did, you MUST invoke the "forge-autopilot" skill via the Skill ` +
@@ -476,18 +469,19 @@ async function main() {
 
   // Step 4: Snoozed sessions — re-fire observer every CHECKPOINT_INTERVAL turns
   if (state.status === 'snoozed') {
+    // "Keep a record?" is asked at most once a session. A decline
+    // lands here as a snooze, and re-offering it later in the same session
+    // asked a question the person had already answered. They can still ask
+    // Forge to track the session themselves; the next session asks afresh.
+    // A snooze the person chose on its own ("remind me later") still returns.
+    if (state.declined_once) return;
     const turnsSinceLast = state.turn_count - (state.last_observer_turn || 0);
     if (turnsSinceLast < CHECKPOINT_INTERVAL) return;
     // Reset state so observer can re-prompt the user. Also reset
     // observer_fired so the per-session "fire once" counter restarts —
     // the user explicitly asked to be re-prompted by snoozing.
-    //
-    // `declined_once` is deliberately NOT cleared here. It is what
-    // lets the returning offer acknowledge that the user already said no
-    // rather than repeating itself verbatim (AC4). A soft decline reaches
-    // this same branch — that reuse is the whole point of the design, since
-    // both planes already speak the snooze contract end to end and adding a
-    // parallel status would fail invisibly across the plane boundary.
+    // A decline never reaches this point (it returned above), so this is a
+    // snooze the person chose.
     sessionState.write({
       observer_blocked: false,
       observer_fired: false,
@@ -498,9 +492,7 @@ async function main() {
     // the reason this offer is BACK is the earlier decline, not how long
     // the session has run, so quoting a duration here would answer a
     // question the user did not ask.
-    process.stdout.write(buildBlockResponse(
-      sessionState.stateFilePath, null, null, Boolean(state.declined_once),
-    ));
+    process.stdout.write(buildBlockResponse(sessionState.stateFilePath, null, null));
     return;
   }
 
@@ -555,19 +547,10 @@ async function main() {
 
   // Step 9: Block Claude's exit and direct it to evaluate the session.
   // Pass the SAME figures the eligibility gate used.
-  //
-  // `declined_once` has to be threaded here too, not only on Step 4's
-  // re-fire path. Step 4 writes `status: null` when it re-offers, so the
-  // NEXT Stop no longer matches Step 4 and arrives HERE instead. Omitting
-  // the flag meant the second and every later re-offer silently reverted to
-  // the original first-offer wording — the exact "asked again as if it had
-  // never asked" behaviour the re-offer wording exists to prevent, and invisible
-  // because the copy still reads perfectly well on its own.
   process.stdout.write(buildBlockResponse(
     sessionState.stateFilePath,
     state.turn_count,
     eligibilityActiveMs,
-    Boolean(state.declined_once),
   ));
 }
 
