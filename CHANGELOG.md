@@ -4,6 +4,29 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-10-29
+
+### Changed
+- **"Keep a record?" is asked at most once a session.** After you decline
+  it, Forge doesn't offer it again later in the same session. You can still
+  ask Forge to track the session yourself, and the next session asks afresh.
+  A snooze you chose ("remind me later") still comes back.
+- **Workflows you author no longer need a closing feedback step.** Every
+  run's recap already says how to send feedback, so the authoring skill
+  doesn't add one. A baseline that has one keeps it unless you ask to drop it.
+- **Removing an org's workflow configuration says what really happens.**
+  Most built-in workflows stop running when their org configuration is
+  removed, but a built-in that ships switched on keeps running, and the
+  authoring skill now says so. A configuration that only switches a workflow
+  on, renames it or limits who sees it is no longer treated as a broken
+  override.
+
+### Fixed
+- **A workflow started in the middle of another no longer strands the first
+  one.** The earlier run is held while the new one runs, with its own
+  question and write lock, and it comes back when the new one ends.
+  Previously it was refused until it was recovered.
+
 ## [2.7.0] - 2026-10-23
 
 ### Changed
