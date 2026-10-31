@@ -4,6 +4,19 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] - 2026-10-30
+
+### Changed
+- **Authored workflows can require the skills your project's own instructions
+  require**, on the step where those instructions require them, as well as the
+  skills found in every repository.
+- **No team question when your plan has no team workflows.** When your org's
+  plan doesn't include team workflows, authoring no longer asks where a new
+  workflow lives: it is saved for the whole org, and the proposal says so in
+  one line. If the plan can't be checked, the question is asked as before. A
+  team-scoped save the plan doesn't allow is explained plainly, with an offer
+  to save for the whole org instead.
+
 ## [2.8.0] - 2026-10-29
 
 ### Changed
