@@ -32,8 +32,8 @@
  *      next Claude Code session starts (which begins with a fresh
  *      cache). Field is written into the cache by the session_observer
  *      gated path when it first detects the admin opt-out.
- *   4. For snoozed: re-fire observer every CHECKPOINT_INTERVAL turns
- *      (re-prompts user to track)
+ *   4. Exit if snoozed (a decline or a chosen snooze is never re-offered
+ *      from here; the prompt router checks a chosen wake condition)
  *   5. Exit if dismissed (terminal — never re-fires)
  *   5b. Exit if status is set (observer already ran — defensive guard)
  *   7. Exit if observer_blocked (already evaluated this session)
@@ -467,34 +467,14 @@ async function main() {
   // Preserve the snooze until the workflow has finished.
   if (state.active_workflow || state.pending_checkpoint) return;
 
-  // Step 4: Snoozed sessions — re-fire observer every CHECKPOINT_INTERVAL turns
-  if (state.status === 'snoozed') {
-    // "Keep a record?" is asked at most once a session. A decline
-    // lands here as a snooze, and re-offering it later in the same session
-    // asked a question the person had already answered. They can still ask
-    // Forge to track the session themselves; the next session asks afresh.
-    // A snooze the person chose on its own ("remind me later") still returns.
-    if (state.declined_once) return;
-    const turnsSinceLast = state.turn_count - (state.last_observer_turn || 0);
-    if (turnsSinceLast < CHECKPOINT_INTERVAL) return;
-    // Reset state so observer can re-prompt the user. Also reset
-    // observer_fired so the per-session "fire once" counter restarts —
-    // the user explicitly asked to be re-prompted by snoozing.
-    // A decline never reaches this point (it returned above), so this is a
-    // snooze the person chose.
-    sessionState.write({
-      observer_blocked: false,
-      observer_fired: false,
-      status: null,
-      last_observer_turn: state.turn_count,
-    });
-    // Block with the observer directive. The elapsed figures are omitted:
-    // the reason this offer is BACK is the earlier decline, not how long
-    // the session has run, so quoting a duration here would answer a
-    // question the user did not ask.
-    process.stdout.write(buildBlockResponse(sessionState.stateFilePath, null, null));
-    return;
-  }
+  // Step 4: Snoozed sessions — never re-fired from here.
+  // "Keep a record?" is asked at most once a session. A decline lands here as
+  // a snooze, and so does a snooze the person chose ("remind me later"):
+  // re-offering either every few turns asked a question the person had
+  // already answered. They can still ask Forge to track the
+  // session themselves, and a wake condition they chose is checked by the
+  // prompt router; the next session asks afresh.
+  if (state.status === 'snoozed') return;
 
   // Step 5: Dismissed sessions — terminal, never re-fire
   if (state.status === 'dismissed') return;
