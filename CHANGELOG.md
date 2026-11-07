@@ -4,6 +4,20 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] - 2026-11-06
+
+### Changed
+- **Editing a saved workflow sends only what changes.** When you change an
+  existing workflow, Forge saves just the changed steps and fields against the
+  version you read, so long workflows no longer get cut off, and a stale edit
+  is refused instead of overwriting someone else's change.
+
+### Fixed
+- **A pending Forge question holds only writes.** While Forge waits for your
+  answer, reads, web lookups and Cursor's own tools keep working; only tools
+  that change something wait. GitHub's combined write tools are now recognized
+  as writes.
+
 ## [2.13.0] - 2026-11-03
 
 ### Changed

@@ -380,8 +380,9 @@ while a write is waiting for the user's approval. Two layers:
 
 **Layer 1 — CHECKPOINT enforcement.** When the orchestrator returns a
 `**CHECKPOINT**` response from `forge__update_state` (a relayed-question
-skill is awaiting user input), the only tools you may call until the
-user has answered are:
+skill is awaiting user input), the hook holds write tools — the same ones the
+write lock holds (tracker, docs and messaging writes, code-host connector
+writes, file writes and deletions) — until the user has answered. Everything else passes:
 
 - a direct question in your reply — relay the pending question (numbered
   choices), then wait for the user's next message; on Cursor that message is
@@ -389,17 +390,16 @@ user has answered are:
 - `forge__update_state` — advance with the user's answer
 - `forge__abandon_workflow` — exit when the workflow no longer applies (see
   below; it is not a way to end a run early)
-- Read-only inspection: filesystem reads and search, plus read-only MCP tools
-  (names starting with `list_`, `get_`, `search_`, `query_`, `fetch_`,
-  `read_`, `notion-search`, `notion-fetch`, `notion-get-`, and Slack's
-  `slack_read_`, `slack_search_`, `slack_list_`, `slack_get_`)
-- Recovery and coordination may use `ToolSearch`, `Skill`, waiting tools and
-  the host task tools. They do not authorize connector writes or workflow
-  advancement.
+- Reads, such as filesystem reads and search, web fetch and search, and
+  read-only MCP tools
+- The host's own task-list, progress and coordination tools, such as
+  `ToolSearch`, `Skill`, waiting tools and the host task tools. They do not
+  authorize connector writes or workflow advancement.
 
 The hook does not check shell commands, here or anywhere (see below). While a
 question is pending, the instructions still apply: wait for the user's answer,
-and use the shell only to inspect, never to act on the decision being asked.
+and use any tool or the shell only to ask, inspect or coordinate, never to act
+on the decision being asked.
 
 **Layer 2 — the write lock.** A step set to Always asks that writes carries a
 `**Write Lock**: on` line until its write plan is approved. Until then the hook
