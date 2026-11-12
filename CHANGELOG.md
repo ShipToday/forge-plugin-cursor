@@ -4,6 +4,14 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] - 2026-11-12
+
+### Changed
+- **Each tracking checkpoint records the time window it covers.** Session
+  time sent to Forge now carries its start and end, so it is no longer counted
+  twice or lost between checkpoints. On Cursor the window uses wall-clock time,
+  because Cursor exposes no session log to plugins.
+
 ## [2.15.0] - 2026-11-09
 
 ### Changed
