@@ -156,7 +156,7 @@ function milestoneReached(state, sessionState) {
  * process that never ran the observer. Returns '' when that id is absent
  * (state file predates the field) so no un-executable directive is sent.
  */
-function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolved) {
+function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolved, window) {
   const conversationId = state.last_observer_conversation_id;
   if (!conversationId) return '';
 
@@ -232,6 +232,7 @@ function buildCheckpointResponse(durationMs, state, stateFilePath, event, resolv
       `conversation_id: ${conversationId}, completed_step: session_observer, ` +
       `state_updates: { outcome: checkpoint, duration_ms: ${durationMs}, ` +
       `event_type: observation_outcome, ` +
+      `activity_window: ${JSON.stringify(window)}, ` +
       `work_item_key: ${workItemKey}, sdlc_stage: ${state.sdlc_stage || 'other'}${skillPayload}${tokenPayload}${clientSessionPayload} }". ` +
       `After calling the tool, continue normally without any additional output about this checkpoint.`,
   });
@@ -395,7 +396,8 @@ async function main() {
     // count: fire on turn cadence OR when the wall-clock floor is exceeded.
     const lastCheckpoint = state.last_checkpoint_at || state.session_start;
     const lastCheckpointMs = new Date(lastCheckpoint).getTime();
-    const elapsedMs = Date.now() - lastCheckpointMs;
+    const checkpointTime = Date.now();
+    const elapsedMs = checkpointTime - lastCheckpointMs;
     if (turnsSinceLast < interval && elapsedMs < TIME_FLOOR_MS) return;
     // Bank ACTIVE engineering time (idle excluded) as the checkpoint delta,
     // not wall-clock. The firing gate ABOVE deliberately still uses wall-clock
@@ -410,20 +412,23 @@ async function main() {
     // The session log is resolved ONCE here and shared with the token capture
     // inside buildCheckpointResponse (no double read/parse).
     const resolved = resolveSessionRecords(event);
-    const activeMs = activeMsFromResolved(resolved, lastCheckpointMs);
+    const activeMs = activeMsFromResolved(resolved, lastCheckpointMs, checkpointTime);
     const durationMs = Number.isFinite(activeMs) ? activeMs : elapsedMs;
+    const window = { start: new Date(lastCheckpointMs).toISOString(), end: new Date(checkpointTime).toISOString(),
+      source: Number.isFinite(activeMs) ? 'transcript_idle_capped' : 'wall_clock' };
     // Build the directive first. It returns '' when last_observer_conversation_id
     // is absent (a state file predating that field). In that case emit nothing
     // AND leave the baseline untouched, so the accumulated time is captured the
     // moment a conversation id becomes available rather than being dropped here.
-    const directive = buildCheckpointResponse(durationMs, state, sessionState.stateFilePath, event, resolved);
+    const directive = buildCheckpointResponse(durationMs, state, sessionState.stateFilePath, event, resolved, window);
     if (!directive) return;
     // Update state for next checkpoint and mark skills as flushed. The baseline
     // (last_checkpoint_at) advances at emit time by design — see the
     // "Checkpoint baseline" design principle in the file header.
     const updates = {
       last_observer_turn: state.turn_count,
-      last_checkpoint_at: new Date().toISOString(),
+      last_checkpoint_at: window.end,
+      checkpoint_activity_window: { ...window, duration_ms: durationMs, conversation_id: state.last_observer_conversation_id },
     };
     if (hasPendingSkills) {
       updates.skills_flushed_at_turn = (state.skill_invocations || []).length;
