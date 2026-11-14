@@ -4,6 +4,16 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.0] - 2026-11-13
+
+### Changed
+- **Hooks and the routing skill match Forge 2.17.0.** That release lets Forge
+  remember the work item a finished run verified, so later questions about the
+  same work skip a repeat tracking offer, and lets you save a discussion to that
+  work item once. Cursor does not receive this context: its prompt hook cannot
+  add context for the model, and its hooks do not pass the chat's id to Forge.
+  Behavior on Cursor is unchanged.
+
 ## [2.16.0] - 2026-11-12
 
 ### Changed
@@ -511,7 +521,7 @@ was already a version ahead at 1.22.2.
   internals.** Several passages named internal database tables, an internal
   issue key, and internal release-phase labels — none of which mean anything
   outside ShipToday's codebase. One was also simply wrong: the save-workflow
-  warnings pointed at a `preset_steps.*` field that does not exist in the
+  warnings pointed at a field that does not exist in the
   payload you submit. Warnings now name the field you actually wrote
   (`workflow.steps.*`), and an empty SDLC-stage list is explained in plain
   terms rather than by naming an internal data-loading phase.
