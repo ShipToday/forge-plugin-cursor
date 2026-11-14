@@ -16,9 +16,9 @@
  * Execution order (first match wins):
  *   0. Seed the git baseline — silent, once per session, before
  *      any of the routing below and before this turn's work happens
- *   1. Linked → silent (already tracked, no directive needed)
- *   2. Active workflow → emit continuation directive
- *   3. Snoozed → emit wake check
+ *   1. Active workflow → emit continuation directive
+ *   2. Verified work context with an eligible initial offer → scope guidance
+ *   3. Linked → silent otherwise; snoozed → emit wake check
  *   4. Otherwise → silent (the model answers, and starts Forge only if the
  *      user asked for it)
  *
@@ -31,6 +31,7 @@
 
 const sessionStateModule = require('./session-state.cjs');
 const { readHeadRef } = require('./git-head.cjs');
+const workContext = require('./work-context.cjs');
 
 // -- Directive builders ------------------------------------------------------
 
@@ -122,6 +123,8 @@ async function main() {
   // sessions in the same directory each track their own workflow.
   const sessionState = sessionStateModule.forSession(event.session_id);
   const state = sessionState.read();
+  const contextTurn = workContext.beginTurn(sessionState, event.session_id, state);
+  if (contextTurn) Object.assign(state, contextTurn);
 
   // Approval authenticity: a prompt arriving while a question is
   // pinned is the user's turn on it — a numbered reply, or a plain answer
@@ -184,14 +187,25 @@ async function main() {
     state.observer_blocked = false; // keep local copy in sync for downstream checks
   }
 
-  // Step 1: Linked sessions need no directives — already tracked
-  if (state.status === 'linked') return;
-
-  // Step 2: Active workflow → tell Claude to continue, not start fresh
+  // Active workflow → tell Claude to continue, not start fresh.
   if (state.active_workflow) {
     emitWorkflowContinuation(state);
     return;
   }
+
+  // Scope is a model decision bound to this prompt, never a lexical hook rule.
+  // No routine receipt is requested once the initial offer is ineligible.
+  // The routing skill loads guidance on demand for an explicit save instead.
+  const continuity = contextTurn && workContext.directive(state, event.session_id);
+  if (continuity) {
+    process.stdout.write(continuity);
+    if (state.status !== 'snoozed' || state.declined_once) return;
+    process.stdout.write('\n');
+  }
+
+  // Linked sessions without continuity need no new directive. Their existing
+  // periodic recording behavior is independent of the scope receipt.
+  if (state.status === 'linked') return;
 
   // Step 3: Snoozed → ask Claude to re-evaluate against the wake condition.
   // Not after a decline: "keep a record?" is asked at most once a

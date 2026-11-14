@@ -26,6 +26,8 @@
 
 'use strict';
 
+const workContext = require('./work-context.cjs');
+
 const sessionStateModule = require('./session-state.cjs');
 const { captureBeforeWorkflow, acknowledgeActivity } = require('./activity-intervals.cjs');
 const { normalizeToolEvent, wrappedForgeCall, identifyForgeCall } = require('./tool-event.cjs');
@@ -233,7 +235,8 @@ function releaseRun(sessionState, conversationId = null) {
 }
 
 function endHeldRun(sessionState, conversationId, release) {
-  sessionState.update((state) => sessionStateModule.endRun(state, conversationId, release));
+  sessionState.update((state) => ({ ...sessionStateModule.endRun(state, conversationId, release),
+    ...(conversationId ? { work_context_ended_runs: [...new Set([...(state.work_context_ended_runs || []), conversationId])].slice(-32) } : {}) }));
 }
 
 // An update or recovery read for a run this session parked brings it to the
@@ -274,7 +277,7 @@ function startHeader(response) {
   return lines.slice(start, end).join('\n');
 }
 
-function resyncFromStateRead(sessionState, toolResponse, toolInput) {
+function resyncFromStateRead(sessionState, toolResponse, toolInput, hostSession) {
   frontRunFor(sessionState, toolInput);
   const state = sessionState.read();
   if (heldRunGone(state, toolResponse, toolInput)) {
@@ -303,6 +306,7 @@ function resyncFromStateRead(sessionState, toolResponse, toolInput) {
   while (index < lines.length && lines[index].trim()) header.push(lines[index++]);
   const statusLine = header[0] || '';
   const headerText = header.join('\n');
+  const contextHeader = start === skipLeadingDisplayBlocks(lines) ? headerText : '';
   const expiry = expiryMetadata(headerText);
   const token = headerText.match(/^\*\*Step Token\*\*: `([^`]+)`/m)?.[1];
   if (expiry === false) return;
@@ -312,6 +316,7 @@ function resyncFromStateRead(sessionState, toolResponse, toolInput) {
   // step that no longer exists. Release the run exactly as the completion
   // branch in main() would have.
   if (RUN_ENDED_LINE.test(statusLine)) {
+    sessionState.update(state => workContext.adopt(state, contextHeader, hostSession, conversation[1]));
     releaseRun(sessionState, conversation[1]);
     return;
   }
@@ -325,6 +330,7 @@ function resyncFromStateRead(sessionState, toolResponse, toolInput) {
     workflow_recovery_required: false, step_resync_required: false,
     ...(token ? { current_step_token: token } : {}),
     ...(expiry ? { workflow_expiry: expiry } : {}),
+    ...workContext.adopt(state, contextHeader, hostSession, conversation[1]),
   };
   if (pendingStep) {
     const metadata = extractPendingCheckpointMetadata(toolResponse);
@@ -386,7 +392,7 @@ const MARKER_LINE = /^\*\*(?:(NEXT STEP)\*\*:\s*|(CHECKPOINT|RE-ENTRY)\*\*\s+—
 // Permissions and Step Token, so leaving it out
 // ended the header at that line — the lock went unread and the Step Token
 // after it fell into the body.
-const METADATA_LINE = /^\*\*(?:Idempotent Retry|Model Routing|Tool Permissions|Write Lock|Step Token|Workflow Expiry|Question ID|Response Field)\*\*:/;
+const METADATA_LINE = /^\*\*(?:Idempotent Retry|Model Routing|Tool Permissions|Write Lock|Step Token|Workflow Expiry|Question ID|Response Field|Work Context)\*\*:/;
 const DISPLAY_BLOCK_OPEN = /^(?:> \*\*Relay to the user\*\*|<<<FORGE_DISPLAY_VERBATIM\b)/;
 const DISPLAY_BLOCK_CLOSE = '<<<END FORGE_DISPLAY_VERBATIM>>>';
 // The caption the server puts above a finished step's `## Findings` block.
@@ -579,6 +585,7 @@ function readHeaderAt(lines, start) {
   let status = null;
   let marker = null;
   let metadata = false;
+  let separated = false;
   let skippedFindings = false;
   if (startsHeader(lines[start] || '')) {
     for (let index = start; index < lines.length; index++) {
@@ -590,8 +597,12 @@ function readHeaderAt(lines, start) {
       // CHECKPOINT body installed its own allowlist.
       if (!line.trim()) {
         if (metadata) break;
+        separated = true;
         continue;
       }
+      // Work Context is appended directly to the established metadata run.
+      // After a blank it may be a quoted first body line, even at completion.
+      if (separated && line.startsWith('**Work Context**:')) break;
       const markerMatch = marker ? null : line.match(MARKER_LINE);
       if (!header.length && isStatusLine(line)) status = line;
       else if (markerMatch) marker = markerMatch;
@@ -610,6 +621,7 @@ function readHeaderAt(lines, start) {
         continue;
       }
       header.push(line);
+      separated = false;
     }
   }
   return { header, status, marker };
@@ -676,6 +688,7 @@ function parseReplyHeader(response, { wrapped = false } = {}) {
     writeLock: extractWriteLock(header.join('\n')),
     expiry: expiryMetadata(header.join('\n')),
     stepToken: header.join('\n').match(/^\*\*Step Token\*\*: `([^`]+)`/m)?.[1],
+    trustedHeader: header.join('\n'),
     // A marker means the run goes on. Without one, the status line completes
     // the run when it counts the last step, or when it is a skill's.
     complete: !kind && !!status && (!counts || counts[1] === counts[2]),
@@ -874,7 +887,7 @@ function extractObserverEvent(event) {
   }
   const updates = input.state_updates;
   if (!updates || updates.event_type !== 'observation_outcome') return null;
-  if (updates.outcome === 'checkpoint') return null;
+  if (updates.outcome === 'checkpoint' || updates.outcome === 'saved_once') return null;
   // Prefer the skill's DECLARED final state. session_observer emits
   // `final_session_state.status` as the authoritative post-observation status
   // (the object its own instructions say the parent must persist). Honouring it
@@ -1063,7 +1076,7 @@ async function main() {
 
   // Recovery reads re-sync the CHECKPOINT pin and nothing else.
   if (toolName.includes(WORKFLOW_STATE_READ_PATTERN)) {
-    resyncFromStateRead(sessionState, toolResponse, event.tool_input);
+    resyncFromStateRead(sessionState, toolResponse, event.tool_input, rawEvent.session_id);
     return;
   }
 
@@ -1137,6 +1150,7 @@ async function main() {
   // Workflow start: mark session as active and capture context
   if (isWorkflowStart && isValidWorkflowResponse(toolResponse)) {
     const conversationId = extractConversationId(toolResponse);
+    if ((sessionState.read().work_context_ended_runs || []).includes(conversationId)) return;
     const currentSkill = extractSkillContext(event);
     const toolPermissions = extractToolPermissions(toolResponse);
     const currentStepSkill = extractCurrentStepSkill(toolResponse);
@@ -1164,12 +1178,21 @@ async function main() {
     // conversation_id above is nulled on completion. Captured here (not
     // on completion) so it always reflects the observer run and is never
     // overwritten by a chained follow-up workflow.
-    if (currentSkill === 'observe_session') {
+    const startInput = typeof event.tool_input === 'string' ? JSON.parse(event.tool_input) : event.tool_input;
+    if (currentSkill === 'observe_session' && startInput?.session_action !== 'save') {
       updates.last_observer_conversation_id = conversationId;
     }
     // A run already in front is parked, not overwritten: it comes back when
     // this one ends, or when it is updated again.
     sessionState.update((state) => ({ ...captureBeforeWorkflow(state, event), ...updates,
+      work_context: state.conversation_id === conversationId
+        || (startInput?.session_action === 'save' && workContext.current(state, rawEvent.session_id)
+          && startInput.work_context?.source_run_id === state.work_context.source_run_id
+          && startInput.work_context?.revision === state.work_context.revision)
+        ? state.work_context : null,
+      work_context_receipt: null,
+      ...workContext.adopt(state, (wrapped || responseText(toolResponse).trimStart().startsWith('**Conversation ID**:'))
+        ? startHeader(toolResponse) : '', rawEvent.session_id, conversationId),
       parked_runs: sessionStateModule.parkFrontRun(state, conversationId) }));
     return;
   }
@@ -1212,6 +1235,11 @@ async function main() {
     if (typeof callInput === 'string') { try { callInput = JSON.parse(callInput); } catch { return; } }
     frontRunFor(sessionState, callInput);
     const tracked = sessionState.read();
+    // Completed-run retries cannot re-adopt a target or reset telemetry for
+    // later work. Passive checkpoints intentionally keep using an ended
+    // observer conversation and retain their existing recording contract.
+    if ((tracked.work_context_ended_runs || []).includes(callInput?.conversation_id)
+        && callInput?.state_updates?.outcome !== 'checkpoint') return;
     if (tracked.active_workflow && callInput?.conversation_id && callInput.conversation_id !== tracked.conversation_id) return;
     // A failed call never advances local state. Only the server's own `Error:`
     // refusal proves the run did not move; a transport failure or an internal
@@ -1227,6 +1255,10 @@ async function main() {
       return;
     }
     if (tracked.workflow_recovery_required) return;
+    if ((header.marker || header.complete) && tracked.active_workflow
+        && tracked.conversation_id === callInput?.conversation_id) {
+      sessionState.update(state => workContext.adopt(state, header.trustedHeader, rawEvent.session_id, callInput?.conversation_id));
+    }
     if (header.complete) sessionState.update(state => acknowledgeActivity(state, rawEvent.tool_response, callInput));
     if (header.marker && header.stepToken) {
       sessionState.write({ current_step_token: header.stepToken, workflow_activity_at: new Date().toISOString(),
@@ -1435,6 +1467,8 @@ async function main() {
   // A new request after completion is the model's to judge (the
   // forge-autopilot trigger rule); nothing here or in prompt-router gates it.
   if (isStateUpdate && header.complete) {
+    const completedInput = typeof event.tool_input === 'string' ? JSON.parse(event.tool_input) : event.tool_input;
+    const savedOnce = completedInput?.state_updates?.outcome === 'saved_once';
     endHeldRun(sessionState, sessionState.read().conversation_id, {
       active_workflow: false,
       observer_blocked: true,
@@ -1462,7 +1496,7 @@ async function main() {
       // pre-workflow tail (activity between the last checkpoint and workflow
       // start) is dropped with it — bounded by TIME_FLOOR_MS, and under-count
       // is the accepted failure direction.
-      last_checkpoint_at: new Date().toISOString(),
+      ...(savedOnce ? {} : { last_checkpoint_at: new Date().toISOString() }),
     });
     return;
   }

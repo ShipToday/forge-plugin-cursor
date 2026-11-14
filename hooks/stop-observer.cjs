@@ -492,6 +492,10 @@ async function main() {
   // Step 7: Already blocked once this session — don't re-block
   if (state.observer_blocked) return;
 
+  // A fresh same-work receipt suppresses just the initial offer. It never
+  // consumes the observer latch or touches periodic linked/logged checkpoints.
+  if (require('./work-context.cjs').sameScope(state, event.session_id)) return;
+
   // Step 7b: Eligibility floor — real signal must exist before the FIRST
   // nudge of a session.
   //
