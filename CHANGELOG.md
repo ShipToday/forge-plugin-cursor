@@ -4,6 +4,16 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.0] - 2026-11-16
+
+### Changed
+- **Hooks match Forge 2.18.0.** That release lets a workflow's record tell the
+  test runs Forge saw from the ones only reported: the plugin keeps a hash of
+  each shell command, its exit code and whether it ran a known test runner
+  (never the command text), and adds that log to each workflow update. Cursor
+  records these calls locally but cannot add them to its updates, because its
+  hooks cannot rewrite a tool call. Behavior on Cursor is unchanged.
+
 ## [2.17.0] - 2026-11-13
 
 ### Changed
