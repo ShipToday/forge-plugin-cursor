@@ -31,6 +31,7 @@ const workContext = require('./work-context.cjs');
 const sessionStateModule = require('./session-state.cjs');
 const { captureBeforeWorkflow, acknowledgeActivity } = require('./activity-intervals.cjs');
 const { normalizeToolEvent, wrappedForgeCall, identifyForgeCall } = require('./tool-event.cjs');
+const { observationFor, recordObservation } = require('./observed-calls.cjs');
 
 // -- Tool name patterns (MCP names include dynamic server UUIDs) --------------
 
@@ -1002,6 +1003,21 @@ async function main() {
     event = JSON.parse(input.trim());
   } catch {
     return; // Malformed input — exit silently
+  }
+
+  // What the session ran: a shell call's command hash and exit code, or that
+  // a test file was edited — never text (observed-calls.cjs). Recorded before
+  // the Forge-only filters below, because a failed shell call and a Codex
+  // wrapper are exactly what they drop. Fail-soft: observation never stops
+  // the rest of this hook.
+  try {
+    const observation = observationFor(event);
+    if (observation) {
+      sessionStateModule.forSession(event.session_id, { waitOutStaleLock: true })
+        .update((state) => recordObservation(state, observation));
+    }
+  } catch (err) {
+    console.error(`Forge | observation skipped: ${err && err.message ? err.message : err}`);
   }
 
   // Claude Code reports a failed call — an MCP result with isError, or a
