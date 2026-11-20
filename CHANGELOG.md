@@ -4,6 +4,14 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.19.0] - 2026-11-19
+
+### Changed
+- **The routing skill matches Forge 2.19.0.** When Forge can work out an
+  approach for a request no workflow covers, the build option is now "Work it
+  out and keep": Forge runs the request first and offers to keep its steps
+  afterwards.
+
 ## [2.18.0] - 2026-11-16
 
 ### Changed
