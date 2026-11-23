@@ -4,6 +4,14 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.20.0] - 2026-11-22
+
+### Changed
+- **Hooks match Forge 2.20.0.** That release keeps a token capture that
+  measured zero instead of dropping it, and skips placeholder usage counters
+  and empty token events. Cursor exposes no per-session token usage, so its
+  hooks capture nothing either way. Behavior on Cursor is unchanged.
+
 ## [2.19.0] - 2026-11-19
 
 ### Changed
