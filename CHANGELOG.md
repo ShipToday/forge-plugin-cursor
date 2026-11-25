@@ -4,6 +4,15 @@ All notable changes to the Forge by ShipToday plugin for Cursor are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.0] - 2026-11-24
+
+### Changed
+- **Hooks match Forge 2.21.0.** That release lets a repo rule show the skill
+  calls Forge saw: the plugin keeps a hash of the name of each skill a session
+  runs (never the name itself) and adds it to the log each workflow update
+  carries. Cursor's hooks cannot add that log to its updates, because they
+  cannot rewrite a tool call. Behavior on Cursor is unchanged.
+
 ## [2.20.0] - 2026-11-22
 
 ### Changed
